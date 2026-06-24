@@ -24,6 +24,7 @@
 #include <QClipboard>
 #include <QFileDialog>
 #include <QDesktopServices>
+#include <QStandardPaths> // used below; included transitively on some platforms only
 #include <QThread>
 #include <QSettings>
 #include <QDesktopWidget>

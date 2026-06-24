@@ -71,6 +71,17 @@ if(Qt5DBus_FOUND)
     target_link_libraries(HoboNickels-qt PRIVATE Qt5::DBus)
 endif()
 
+if(WIN32)
+    # The GUI is a separate compilation from hobonickels_core, so it must repeat
+    # the Windows settings the daemon core has: define WIN32 (mingw only sets
+    # _WIN32), winsock + shell/ole libs, and Qt5::WinMain to provide WinMain()
+    # for the WIN32 (GUI subsystem) executable.
+    target_compile_definitions(HoboNickels-qt PRIVATE
+        WIN32 _WIN32_WINNT=0x0600 WIN32_LEAN_AND_MEAN)
+    target_link_libraries(HoboNickels-qt PRIVATE
+        Qt5::WinMain ws2_32 mswsock iphlpapi shlwapi shell32 ole32)
+endif()
+
 if(ENABLE_UPNP)
     target_compile_definitions(HoboNickels-qt PRIVATE USE_UPNP=1)
     target_include_directories(HoboNickels-qt PRIVATE ${MINIUPNPC_INCLUDE_DIR})

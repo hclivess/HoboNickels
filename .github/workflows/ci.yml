@@ -125,6 +125,56 @@ jobs:
           name: HoboNickelsd-windows-x86_64
           path: build/HoboNickelsd.exe
 
+  build-windows-gui:
+    name: Windows Qt5 GUI (MSYS2 mingw64)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-boost
+            mingw-w64-x86_64-openssl
+            mingw-w64-x86_64-db
+            mingw-w64-x86_64-leveldb
+            mingw-w64-x86_64-miniupnpc
+            mingw-w64-x86_64-qt5-base
+            mingw-w64-x86_64-qt5-tools
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DUSE_SYSTEM_LEVELDB=ON \
+            -DENABLE_UPNP=ON \
+            -DWITH_QT_GUI=ON \
+            -DBUILD_TESTS=OFF
+
+      - name: Build GUI
+        run: cmake --build build -j"$(nproc)" --target HoboNickels-qt
+
+      - name: Verify the .exe was produced
+        run: |
+          test -f build/HoboNickels-qt.exe
+          file build/HoboNickels-qt.exe
+
+      - name: Upload Windows Qt GUI
+        uses: actions/upload-artifact@v4
+        with:
+          name: HoboNickels-qt-windows-x86_64
+          path: build/HoboNickels-qt.exe
+
   docker:
     name: Docker image
     runs-on: ubuntu-24.04
