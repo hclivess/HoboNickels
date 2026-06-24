@@ -765,7 +765,7 @@ bool BackupWallet(const CWallet& wallet, const string& strDest, bool fMulti)
 #if BOOST_VERSION >= 105000
                     pathDest += wallet.strWalletFile;
 #else
-                    boost::filesystem::path pathBaseName = boost::filesystem::basename (pathDest) + wallet.strWalletFile;
+                    boost::filesystem::path pathBaseName = pathDest.stem().string() + wallet.strWalletFile;
                     boost::filesystem::path pathTemp = pathDest.parent_path();
                     pathDest = pathTemp / pathBaseName;
 #endif
@@ -773,7 +773,7 @@ bool BackupWallet(const CWallet& wallet, const string& strDest, bool fMulti)
 
                 try {
 #if BOOST_VERSION >= 104000
-                    boost::filesystem::copy_file(pathSrc, pathDest, boost::filesystem::copy_option::overwrite_if_exists);
+                    boost::filesystem::copy_file(pathSrc, pathDest, boost::filesystem::copy_options::overwrite_existing);
 #else
                     boost::filesystem::copy_file(pathSrc, pathDest);
 #endif
