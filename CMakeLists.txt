@@ -76,24 +76,42 @@ endif()
 # ---------------------------------------------------------------------------
 # Bundled LevelDB (built via its own Makefile through ExternalProject)
 # ---------------------------------------------------------------------------
-include(ExternalProject)
+# The bundled LevelDB 1.19 builds via its own Unix Makefile and has no Windows
+# port, so on Windows (mingw) we use the system package instead.
+option(USE_SYSTEM_LEVELDB "Link against the system LevelDB instead of the bundled copy"
+       ${WIN32})
 
-set(LEVELDB_SRC   ${CMAKE_CURRENT_SOURCE_DIR}/src/leveldb)
-set(LEVELDB_LIB   ${LEVELDB_SRC}/out-static/libleveldb.a)
-set(LEVELDB_MEMENV ${LEVELDB_SRC}/out-static/libmemenv.a)
+if(USE_SYSTEM_LEVELDB)
+    find_path(LEVELDB_INCLUDE_DIR leveldb/db.h)
+    find_library(LEVELDB_SYS_LIB NAMES leveldb)
+    if(NOT LEVELDB_INCLUDE_DIR OR NOT LEVELDB_SYS_LIB)
+        message(FATAL_ERROR "USE_SYSTEM_LEVELDB=ON but the LevelDB library/headers were not found")
+    endif()
+    add_library(leveldb INTERFACE)
+    target_include_directories(leveldb INTERFACE ${LEVELDB_INCLUDE_DIR})
+    target_link_libraries(leveldb INTERFACE ${LEVELDB_SYS_LIB})
+    message(STATUS "LevelDB: system (${LEVELDB_SYS_LIB})")
+    set(LEVELDB_INCLUDE_DIRS ${LEVELDB_INCLUDE_DIR})
+else()
+    include(ExternalProject)
+    set(LEVELDB_SRC   ${CMAKE_CURRENT_SOURCE_DIR}/src/leveldb)
+    set(LEVELDB_LIB   ${LEVELDB_SRC}/out-static/libleveldb.a)
+    set(LEVELDB_MEMENV ${LEVELDB_SRC}/out-static/libmemenv.a)
 
-ExternalProject_Add(leveldb_ext
-    SOURCE_DIR        ${LEVELDB_SRC}
-    BUILD_IN_SOURCE   1
-    CONFIGURE_COMMAND ""
-    BUILD_COMMAND     $(MAKE) out-static/libleveldb.a out-static/libmemenv.a
-    INSTALL_COMMAND   ""
-    BUILD_BYPRODUCTS  ${LEVELDB_LIB} ${LEVELDB_MEMENV}
-    LOG_BUILD         1)
+    ExternalProject_Add(leveldb_ext
+        SOURCE_DIR        ${LEVELDB_SRC}
+        BUILD_IN_SOURCE   1
+        CONFIGURE_COMMAND ""
+        BUILD_COMMAND     $(MAKE) out-static/libleveldb.a out-static/libmemenv.a
+        INSTALL_COMMAND   ""
+        BUILD_BYPRODUCTS  ${LEVELDB_LIB} ${LEVELDB_MEMENV}
+        LOG_BUILD         1)
 
-add_library(leveldb STATIC IMPORTED GLOBAL)
-set_target_properties(leveldb PROPERTIES IMPORTED_LOCATION ${LEVELDB_LIB})
-add_dependencies(leveldb leveldb_ext)
+    add_library(leveldb STATIC IMPORTED GLOBAL)
+    set_target_properties(leveldb PROPERTIES IMPORTED_LOCATION ${LEVELDB_LIB})
+    add_dependencies(leveldb leveldb_ext)
+    set(LEVELDB_INCLUDE_DIRS ${LEVELDB_SRC}/include ${LEVELDB_SRC}/helpers)
+endif()
 
 # ---------------------------------------------------------------------------
 # Core / daemon sources (legacy IRC seeding and the dead scrypt ASM are dropped)
@@ -137,8 +155,7 @@ set(CORE_SOURCES
 set(COMMON_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/json
-    ${LEVELDB_SRC}/include
-    ${LEVELDB_SRC}/helpers)
+    ${LEVELDB_INCLUDE_DIRS})
 
 set(COMMON_DEFINES USE_LEVELDB BOOST_SPIRIT_THREADSAFE __STDC_FORMAT_MACROS)
 
@@ -146,7 +163,9 @@ set(COMMON_DEFINES USE_LEVELDB BOOST_SPIRIT_THREADSAFE __STDC_FORMAT_MACROS)
 # noui.cpp lives here (the daemon and tests both need the no-UI signal stubs);
 # init.cpp (which holds the daemon main()) is added only to the daemon.
 add_library(hobonickels_core OBJECT ${CORE_SOURCES} src/noui.cpp)
-add_dependencies(hobonickels_core leveldb_ext)
+if(NOT USE_SYSTEM_LEVELDB)
+    add_dependencies(hobonickels_core leveldb_ext)
+endif()
 target_include_directories(hobonickels_core PUBLIC
     ${COMMON_INCLUDE_DIRS} ${BDBXX_INCLUDE_DIR})
 target_compile_definitions(hobonickels_core PUBLIC ${COMMON_DEFINES})
@@ -157,6 +176,13 @@ target_link_libraries(hobonickels_core PUBLIC
     ${BDBXX_LIBRARY}
     Threads::Threads
     ${CMAKE_DL_LIBS})
+
+if(WIN32)
+    # Winsock and friends required by net.cpp / netbase.cpp / miniupnpc.
+    target_link_libraries(hobonickels_core PUBLIC ws2_32 mswsock iphlpapi shlwapi)
+    # Target a modern-enough Windows API (Vista+) for the socket calls used.
+    target_compile_definitions(hobonickels_core PUBLIC _WIN32_WINNT=0x0600 WIN32_LEAN_AND_MEAN)
+endif()
 
 if(ENABLE_UPNP)
     target_compile_definitions(hobonickels_core PUBLIC USE_UPNP=1)

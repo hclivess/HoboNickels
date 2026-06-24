@@ -38,6 +38,60 @@ jobs:
           echo "$out" | head -n 5
           echo "$out" | grep -q "HoboNickels version"
 
+      - name: Upload Linux daemon
+        uses: actions/upload-artifact@v4
+        with:
+          name: HoboNickelsd-linux-x86_64
+          path: build/HoboNickelsd
+
+  build-windows:
+    name: Windows (MSYS2 mingw64, daemon)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-boost
+            mingw-w64-x86_64-openssl
+            mingw-w64-x86_64-db
+            mingw-w64-x86_64-leveldb
+            mingw-w64-x86_64-miniupnpc
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DUSE_SYSTEM_LEVELDB=ON \
+            -DENABLE_UPNP=ON \
+            -DBUILD_TESTS=OFF
+
+      - name: Build
+        run: cmake --build build -j"$(nproc)" --target HoboNickelsd
+
+      - name: Smoke test
+        run: |
+          out="$(./build/HoboNickelsd.exe --help 2>&1 || true)"
+          echo "$out" | head -n 5
+          echo "$out" | grep -q "HoboNickels version"
+
+      - name: Upload Windows daemon
+        uses: actions/upload-artifact@v4
+        with:
+          name: HoboNickelsd-windows-x86_64
+          path: build/HoboNickelsd.exe
+
   docker:
     name: Docker image
     runs-on: ubuntu-24.04
