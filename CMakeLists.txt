@@ -180,8 +180,11 @@ target_link_libraries(hobonickels_core PUBLIC
 if(WIN32)
     # Winsock and friends required by net.cpp / netbase.cpp / miniupnpc.
     target_link_libraries(hobonickels_core PUBLIC ws2_32 mswsock iphlpapi shlwapi)
-    # Target a modern-enough Windows API (Vista+) for the socket calls used.
-    target_compile_definitions(hobonickels_core PUBLIC _WIN32_WINNT=0x0600 WIN32_LEAN_AND_MEAN)
+    # The code keys all Windows branches off bare WIN32, which modern mingw-w64
+    # no longer predefines (it only sets _WIN32). Define it explicitly, and
+    # target a modern-enough Windows API (Vista+) for the socket calls used.
+    target_compile_definitions(hobonickels_core PUBLIC
+        WIN32 _WIN32_WINNT=0x0600 WIN32_LEAN_AND_MEAN)
 endif()
 
 if(ENABLE_UPNP)
