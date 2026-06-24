@@ -10,6 +10,7 @@
 #include "miner.h"
 #include "kernel.h"
 #include <boost/algorithm/string/replace.hpp>
+#include <memory>
 
 using namespace std;
 
@@ -107,7 +108,7 @@ public:
 CBlock* CreateNewBlock(CWallet* pwallet, bool fProofOfStake)
 {
     // Create new block
-    auto_ptr<CBlock> pblock(new CBlock());
+    unique_ptr<CBlock> pblock(new CBlock());
     if (!pblock.get())
         return NULL;
 
@@ -560,7 +561,7 @@ void StakeMiner(CWallet *pwallet)
         //
         CBlockIndex* pindexPrev = pindexBest;
 
-        auto_ptr<CBlock> pblock(CreateNewBlock(pwallet, true));
+        unique_ptr<CBlock> pblock(CreateNewBlock(pwallet, true));
         if (!pblock.get())
             return;
         IncrementExtraNonce(pblock.get(), pindexPrev, nExtraNonce);

@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, main, modernize ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    name: Linux (Ubuntu 24.04, GCC, daemon)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config \
+            libboost-all-dev libssl-dev libdb++-dev \
+            libminiupnpc-dev zlib1g-dev
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_UPNP=ON
+
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+
+      - name: Run unit tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Smoke test the daemon
+        run: ./build/HoboNickelsd --help | head -n 3
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t hobonickels:ci .
+      - name: Smoke test image
+        run: docker run --rm hobonickels:ci --help | head -n 3

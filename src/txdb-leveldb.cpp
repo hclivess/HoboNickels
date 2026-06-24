@@ -12,7 +12,7 @@
 #include <leveldb/env.h>
 #include <leveldb/cache.h>
 #include <leveldb/filter_policy.h>
-#include <memenv/memenv.h>
+// (memenv was #included but never used; dropped during modernization)
 
 #include "kernel.h"
 #include "checkpoints.h"
@@ -35,27 +35,27 @@ static leveldb::Options GetOptions() {
 
 void init_blockindex(leveldb::Options& options, bool fRemoveOld = false) {
     // First time init.
-    filesystem::path directory = GetDataDir() / "txleveldb";
+    boost::filesystem::path directory = GetDataDir() / "txleveldb";
 
     if (fRemoveOld) {
-        filesystem::remove_all(directory); // remove directory
+        boost::filesystem::remove_all(directory); // remove directory
         unsigned int nFile = 1;
 
         while (true)
         {
-            filesystem::path strBlockFile = GetDataDir() / strprintf("blk%04u.dat", nFile);
+            boost::filesystem::path strBlockFile = GetDataDir() / strprintf("blk%04u.dat", nFile);
 
             // Break if no such file
-            if( !filesystem::exists( strBlockFile ) )
+            if( !boost::filesystem::exists( strBlockFile ) )
                 break;
 
-            filesystem::remove(strBlockFile);
+            boost::filesystem::remove(strBlockFile);
 
             nFile++;
         }
     }
 
-    filesystem::create_directory(directory);
+    boost::filesystem::create_directory(directory);
     LogPrintf("Opening LevelDB in %s\n", directory.string());
     leveldb::Status status = leveldb::DB::Open(options, directory.string(), &txdb);
     if (!status.ok()) {

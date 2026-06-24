@@ -19,6 +19,18 @@
 #include <stdlib.h>
 #include <string.h>
 
+// strlcpy/strlcat are provided by libc on the BSDs/macOS and, since glibc 2.38,
+// on Linux too.  Defining our own inline versions then conflicts with the
+// system declarations, so only define them when the platform does not.
+#if defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 38))
+#  define HAVE_SYSTEM_STRLCPY 1
+#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || \
+      defined(__NetBSD__) || defined(__DragonFly__)
+#  define HAVE_SYSTEM_STRLCPY 1
+#endif
+
+#ifndef HAVE_SYSTEM_STRLCPY
+
 /*
  * Copy src to string dst of size siz.  At most siz-1 characters
  * will be copied.  Always NUL terminates (unless siz == 0).
@@ -87,4 +99,6 @@ inline size_t strlcat(char *dst, const char *src, size_t siz)
 
     return(dlen + (s - src)); /* count does not include NUL */
 }
+
+#endif /* !HAVE_SYSTEM_STRLCPY */
 #endif

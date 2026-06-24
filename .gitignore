@@ -1,0 +1,39 @@
+# CMake build output
+/build/
+build*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+
+# Bundled LevelDB build artifacts
+src/leveldb/*.o
+src/leveldb/**/*.o
+src/leveldb/out-static/
+src/leveldb/out-shared/
+src/leveldb/build_config.mk
+src/leveldb/*_test
+src/leveldb/db_bench
+src/leveldb/leveldbutil
+
+# Legacy in-tree object files
+src/obj/*.o
+src/obj/*.P
+src/obj-test/*.o
+src/obj-test/*.P
+src/*.o
+src/build.h
+
+# Binaries
+HoboNickelsd
+HoboNickels-qt
+test_hobonickels
+*.a
+*.so
+*.exe
+
+# Editor / OS
+*.swp
+*~
+.DS_Store
+.vscode/
+.idea/

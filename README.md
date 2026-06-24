@@ -1,4 +1,29 @@
-HoboNickels Crypto Tokens
+# HoboNickels (HBN)
+
+A proof-of-stake / proof-of-work hybrid cryptocurrency, originally a 2014-era
+Bitcoin / Peercoin / Novacoin fork.
+
+## Modernized build
+
+This tree has been modernized to build and run on a current toolchain
+(**Ubuntu 24.04**, **GCC 13**, **OpenSSL 3**, **Boost 1.83**, **Berkeley DB 5.3**,
+**Qt 5**) via a new CMake build system. Consensus behaviour — signatures,
+addresses, hashing — is unchanged.
+
+```sh
+sudo apt-get install -y build-essential cmake pkg-config \
+    libboost-all-dev libssl-dev libdb++-dev libminiupnpc-dev zlib1g-dev
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j"$(nproc)"
+./build/HoboNickelsd --help
+```
+
+See [`doc/build-unix-modern.md`](doc/build-unix-modern.md) for full options
+(UPnP, Qt5 GUI, tests) and Docker usage.
+
+---
+
+## HoboNickels Crypto Tokens
 
 * Staking:
   * 100% Max Yearly Stake Reward
