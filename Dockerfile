@@ -35,8 +35,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libboost-system1.83.0 libboost-filesystem1.83.0 \
         libboost-program-options1.83.0 libboost-thread1.83.0 \
-        libboost-chrono1.83.0 \
-        libdb5.3++ libssl3 libminiupnpc17 zlib1g \
+        libboost-chrono1.83.0t64 \
+        libdb5.3++t64 libssl3t64 libminiupnpc17 zlib1g \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --create-home --home-dir /data --shell /usr/sbin/nologin hobo
 

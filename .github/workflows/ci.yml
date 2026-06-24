@@ -31,7 +31,12 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
       - name: Smoke test the daemon
-        run: ./build/HoboNickelsd --help | head -n 3
+        run: |
+          # The daemon prints help to stderr and exits non-zero (no command
+          # given), so assert on the banner rather than the exit code.
+          out="$(./build/HoboNickelsd --help 2>&1 || true)"
+          echo "$out" | head -n 5
+          echo "$out" | grep -q "HoboNickels version"
 
   docker:
     name: Docker image
@@ -41,4 +46,7 @@ jobs:
       - name: Build image
         run: docker build -t hobonickels:ci .
       - name: Smoke test image
-        run: docker run --rm hobonickels:ci --help | head -n 3
+        run: |
+          out="$(docker run --rm hobonickels:ci --help 2>&1 || true)"
+          echo "$out" | head -n 5
+          echo "$out" | grep -q "HoboNickels version"
