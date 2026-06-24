@@ -9,16 +9,23 @@ find_package(Qt5 5.9 REQUIRED COMPONENTS Core Gui Widgets Network)
 find_package(Qt5 QUIET COMPONENTS DBus LinguistTools)
 
 set(CMAKE_AUTOMOC ON)
-set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
-set(CMAKE_AUTOUIC_SEARCH_PATHS ${CMAKE_CURRENT_SOURCE_DIR}/src/qt/forms)
+# NOTE: AUTOUIC is intentionally OFF. The project ships its own non-uic header
+# src/ui_interface.h, whose name matches AUTOUIC's "ui_*.h" detection and makes
+# it look for a bogus "interface.ui". Drive uic explicitly instead.
+file(GLOB UI_FORMS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/qt/forms/*.ui)
+qt5_wrap_ui(UI_HEADERS ${UI_FORMS})
 
 # GUI-side .cpp: the src/qt/* widgets/models plus two wallet views that live
 # in src/.  qrcodedialog.cpp is gated behind USE_QRCODE (libqrencode), and the
 # Objective-C++ mac shims / Qt test harness are excluded on this build.
 file(GLOB QT_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/qt/*.cpp)
 list(REMOVE_ITEM QT_SOURCES
-     ${CMAKE_CURRENT_SOURCE_DIR}/src/qt/qrcodedialog.cpp)
+     # gated behind USE_QRCODE (libqrencode)
+     ${CMAKE_CURRENT_SOURCE_DIR}/src/qt/qrcodedialog.cpp
+     # dead code: not in the original .pro, header/impl out of sync, and the
+     # .ui uses a plain QComboBox (not this promoted class).
+     ${CMAKE_CURRENT_SOURCE_DIR}/src/qt/qcomboboxfiltercoins.cpp)
 
 set(GUI_SOURCES
     ${CORE_SOURCES}
@@ -27,6 +34,7 @@ set(GUI_SOURCES
     src/walletview.cpp
     src/walletstack.cpp
     ${QT_SOURCES}
+    ${UI_HEADERS}
     src/qt/bitcoin.qrc)
 
 option(USE_QRCODE "Build the GUI with QR-code support (libqrencode)" OFF)
@@ -44,7 +52,8 @@ target_include_directories(HoboNickels-qt PRIVATE
     ${COMMON_INCLUDE_DIRS}
     ${BDBXX_INCLUDE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/src/qt
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/qt/forms)
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/qt/forms
+    ${CMAKE_CURRENT_BINARY_DIR})   # generated ui_*.h from qt5_wrap_ui
 
 target_compile_definitions(HoboNickels-qt PRIVATE ${COMMON_DEFINES} QT_GUI)
 

@@ -14,6 +14,9 @@
 #include <QTimer>
 #include <QDebug>
 
+#include <boost/bind/bind.hpp>
+using namespace boost::placeholders; // bare _1/_2 for boost::bind (Boost 1.76+)
+
 static const qint64 nClientStartupTime = GetTime();
 double GetPoSKernelPS(const CBlockIndex* blockindex = NULL);
 double GetDifficulty(const CBlockIndex* blockindex);

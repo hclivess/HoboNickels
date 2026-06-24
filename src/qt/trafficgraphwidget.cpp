@@ -2,6 +2,7 @@
 #include "clientmodel.h"
 
 #include <QPainter>
+#include <QPainterPath> // Qt5 split QPainterPath out of <QtGui>
 #include <QColor>
 #include <QTimer>
 

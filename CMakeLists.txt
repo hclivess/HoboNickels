@@ -157,7 +157,11 @@ set(COMMON_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/src/json
     ${LEVELDB_INCLUDE_DIRS})
 
-set(COMMON_DEFINES USE_LEVELDB BOOST_SPIRIT_THREADSAFE __STDC_FORMAT_MACROS)
+# BOOST_BIND_GLOBAL_PLACEHOLDERS keeps the bare _1/_2 boost::bind placeholders
+# (used by the boost::signals2 connections) available; Boost 1.76+ removed them
+# from the global namespace by default.
+set(COMMON_DEFINES USE_LEVELDB BOOST_SPIRIT_THREADSAFE __STDC_FORMAT_MACROS
+    BOOST_BIND_GLOBAL_PLACEHOLDERS)
 
 # Shared core compiled once, reused by the daemon, the GUI and the tests.
 # noui.cpp lives here (the daemon and tests both need the no-UI signal stubs);

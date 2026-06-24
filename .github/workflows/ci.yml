@@ -44,6 +44,39 @@ jobs:
           name: HoboNickelsd-linux-x86_64
           path: build/HoboNickelsd
 
+  build-gui:
+    name: Linux Qt5 GUI (Ubuntu 24.04)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config \
+            libboost-all-dev libssl-dev libdb++-dev \
+            libminiupnpc-dev zlib1g-dev \
+            qtbase5-dev qttools5-dev qttools5-dev-tools qtbase5-dev-tools
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DWITH_QT_GUI=ON -DBUILD_TESTS=OFF
+
+      - name: Build GUI
+        run: cmake --build build -j"$(nproc)" --target HoboNickels-qt
+
+      - name: Smoke test (offscreen)
+        run: |
+          out="$(QT_QPA_PLATFORM=offscreen ./build/HoboNickels-qt -? 2>&1 || true)"
+          echo "$out" | head -n 5
+          echo "$out" | grep -q "HoboNickels-Qt version"
+
+      - name: Upload Qt GUI
+        uses: actions/upload-artifact@v4
+        with:
+          name: HoboNickels-qt-linux-x86_64
+          path: build/HoboNickels-qt
+
   build-windows:
     name: Windows (MSYS2 mingw64, daemon)
     runs-on: windows-latest

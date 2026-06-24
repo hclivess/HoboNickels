@@ -1,7 +1,8 @@
 #ifndef QCOMBOBOCFILTERCOINS_H
 #define QCOMBOBOCFILTERCOINS_H
  
-#include <QtGui>
+// QComboBox lives in QtWidgets since Qt5; <QtGui> no longer pulls it in.
+#include <QComboBox>
 
 //Derived Class from QComboBox
 class QComboBoxFilterCoins: public QComboBox

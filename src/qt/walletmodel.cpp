@@ -14,6 +14,9 @@
 #include <QDebug>
 #include <QMessageBox>
 
+#include <boost/bind/bind.hpp>
+using namespace boost::placeholders; // bare _1.._5 for boost::bind (Boost 1.76+)
+
 WalletModel::WalletModel(CWallet *wallet, OptionsModel *optionsModel, QObject *parent) :
     QObject(parent), wallet(wallet), optionsModel(optionsModel), addressTableModel(0),
     transactionTableModel(0),
