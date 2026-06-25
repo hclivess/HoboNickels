@@ -2422,15 +2422,23 @@ DBErrors CWallet::LoadWallet(bool& fFirstRunRet)
         return nLoadWalletRet;
     fFirstRunRet = !vchDefaultKey.IsValid();
 
-    // Optional startup compaction. A long-running staking wallet.dat only grows on
-    // disk -- BDB never returns freed pages to the OS -- so with -compactwallet we
-    // rewrite it to its live records now, while the file is not yet in active use
-    // (the flush thread starts below). Off by default so huge wallets don't pay a
-    // slow startup unless asked; the `compactwallet` RPC does the same on demand.
-    if (GetBoolArg("-compactwallet", false))
+    // Automatic wallet compaction (default on; -walletcompact=0 to disable).
+    // A staking wallet.dat only ever grows on disk: BDB never returns freed pages
+    // to the OS, so deleted/rewritten records leave slack that piles up forever.
+    // Compact at load -- the safest moment, since the file is not yet in active use
+    // (the flush thread starts below) -- which also reclaims any slack inherited
+    // from older builds. The flush thread then keeps long-running sessions bounded.
+    if (GetBoolArg("-walletcompact", true))
     {
-        LogPrintf("Compacting wallet %s on startup (-compactwallet)\n", strWalletFile.c_str());
-        CDB::Rewrite(strWalletFile);
+        try {
+            boost::filesystem::path p = GetDataDir() / strWalletFile;
+            // Skip trivially small wallets (nothing to reclaim, not worth the rewrite).
+            if (boost::filesystem::exists(p) && boost::filesystem::file_size(p) >= (uintmax_t)1024 * 1024)
+            {
+                LogPrintf("Auto-compacting wallet %s on load\n", strWalletFile.c_str());
+                CDB::Rewrite(strWalletFile);
+            }
+        } catch (const boost::filesystem::filesystem_error&) {}
     }
 
     NewThread(ThreadFlushWalletDB, &strWalletFile);

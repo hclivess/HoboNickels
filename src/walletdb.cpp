@@ -697,6 +697,17 @@ void ThreadFlushWalletDB(void* parg)
     unsigned int nLastSeen = nWalletDBUpdated;
     unsigned int nLastFlushed = nWalletDBUpdated;
     int64_t nLastWalletUpdate = GetTime();
+
+    // Automatic compaction: rewrite wallet.dat once it grows past <factor>x its
+    // last-compacted size, so BDB free-list slack stays bounded on a long-running
+    // node (LoadWallet already compacted it once at load to set the clean baseline).
+    bool fAutoCompact = GetBoolArg("-walletcompact", true);
+    int64_t nCompactInterval = GetArg("-walletcompactinterval", 3600); // seconds between size checks
+    int64_t nCompactFactor = std::max<int64_t>(2, GetArg("-walletcompactfactor", 2));
+    const uintmax_t nCompactMinBytes = (uintmax_t)1024 * 1024;
+    int64_t nNextCompactCheck = GetTime() + nCompactInterval;
+    uintmax_t nCompactBaseline = 0;
+
     while (!fShutdown)
     {
         MilliSleep(500);
@@ -739,6 +750,28 @@ void ThreadFlushWalletDB(void* parg)
                     }
                 }
             }
+        }
+
+        // Automatic compaction (see declarations above). CDB::Rewrite self-
+        // synchronises on the file's use count, so it is safe to call here outside
+        // the flush critical section. This keeps a months-long staking session from
+        // ever accumulating unbounded slack.
+        if (fAutoCompact && GetTime() >= nNextCompactCheck)
+        {
+            nNextCompactCheck = GetTime() + nCompactInterval;
+            try {
+                boost::filesystem::path p = GetDataDir() / strFile;
+                uintmax_t nSize = boost::filesystem::exists(p) ? boost::filesystem::file_size(p) : 0;
+                if (nCompactBaseline == 0)
+                    nCompactBaseline = nSize; // first observation after load-time compaction
+                else if (nSize >= nCompactMinBytes && nSize > nCompactBaseline * (uintmax_t)nCompactFactor)
+                {
+                    LogPrintf("Auto-compacting wallet %s: %llu bytes (> %dx baseline)\n",
+                              strFile.c_str(), (unsigned long long)nSize, (int)nCompactFactor);
+                    if (CDB::Rewrite(strFile))
+                        nCompactBaseline = boost::filesystem::exists(p) ? boost::filesystem::file_size(p) : nSize;
+                }
+            } catch (const boost::filesystem::filesystem_error&) {}
         }
     }
 }

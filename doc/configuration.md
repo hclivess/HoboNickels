@@ -58,16 +58,20 @@ addnode=coins.dognose.net
 A long-running staking `wallet.dat` only ever **grows** on disk: it's a Berkeley DB
 file, and BDB never returns freed pages to the OS, so every stake (one permanent
 coinstake record) plus rewritten records leave slack that piles up. Historically the
-only workaround was to restore an older, smaller backup. Now:
+only workaround was to restore an older, smaller backup. **The wallet now compacts
+itself automatically**, so this no longer happens:
 
-| Option / RPC | Description |
-| --- | --- |
-| `compactwallet` (RPC) | Rewrite `wallet.dat` to just its live records, reclaiming all free-list slack. Crash-safe (the original is replaced atomically). Reports size before/after. The supported alternative to restoring an old backup. |
-| `-compactwallet` | Do that compaction automatically **on startup** (off by default, so huge wallets don't pay a slow start unless asked). |
-| `-zapwallettxes` | Clears the wallet's transaction list (diagnostic; implies `-rescan`) — now also compacts the file afterwards, so it actually shrinks on disk. |
+| Option / RPC | Default | Description |
+| --- | --- | --- |
+| `-walletcompact` | **1 (on)** | Automatic compaction. The wallet is rewritten to its live records **at load** (reclaiming any slack inherited from older builds) and again **during the session** whenever the file grows past `-walletcompactfactor`× its last-compacted size. This bounds the file forever — it can't accumulate unbounded slack no matter how long it runs or how much it stakes. Set `0` to disable. |
+| `-walletcompactfactor` | **2** | Re-compact when the file reaches this multiple of its last-compacted size. |
+| `-walletcompactinterval` | **3600** | Seconds between the (cheap) size checks. |
+| `compactwallet` (RPC) | — | Compact on demand. Rewrites `wallet.dat` to its live records, crash-safe (the original is replaced atomically), and reports size before/after. |
+| `-zapwallettxes` | — | Clears the wallet's transaction list (diagnostic; implies `-rescan`) — now also compacts the file afterwards, so it actually shrinks on disk. |
 
-The split/combine defaults (above) reduce the *rate* of growth (less output
-fragmentation), but compaction is what reclaims the space. See
+Compaction reclaims BDB **slack** (the unbounded part). The genuine record growth
+(one coinstake per stake) is real data, not slack, and only grows slowly; the
+split/combine defaults (above) further reduce the rate. See
 [performance.md](performance.md) for the full analysis.
 
 ## GUI (Qt wallet)

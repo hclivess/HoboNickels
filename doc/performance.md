@@ -57,11 +57,17 @@ compounding causes:
 The autocombine/split fix only slowed the *rate* (less fragmentation); it doesn't
 compact or prune. Applied fixes (wallet-only, non-consensus):
 
-- **`compactwallet` RPC** (rpcwallet.cpp) — rewrites `wallet.dat` to its live record
-  set on demand via the existing crash-safe `CDB::Rewrite`; reports size before/after.
-  The supported replacement for "restore an older backup."
-- **`-compactwallet`** — do that compaction automatically at startup (opt-in; the file
-  isn't in active use yet, so the rewrite's guards hold).
+- **Automatic compaction (`-walletcompact`, default on).** The wallet rewrites itself
+  to its live record set (via the crash-safe `CDB::Rewrite`) **at load** — the safest
+  moment, before the file is in active use, which also reclaims slack inherited from
+  older builds — and again **during the session** from the flush thread whenever the
+  file grows past `-walletcompactfactor`× (default 2) its last-compacted size. That
+  second trigger is what makes it *futureproof*: the slack is bounded to a fixed
+  multiple of the live size forever, so a node that runs for months without restart
+  still never accumulates unbounded slack. `CDB::Rewrite` self-synchronises on the
+  file use count, so the flush-thread call is safe.
+- **`compactwallet` RPC** (rpcwallet.cpp) — the same compaction on demand; reports
+  size before/after. Verified end-to-end (reclaimed real bytes on a live node).
 - **`-zapwallettxes` now shrinks** — `CWalletDB::ZapWalletTx` returned `DB_LOAD_OK`,
   so the existing rewrite branch was dead; it now returns `DB_NEED_REWRITE`.
 - **Less write amplification** — `WalletUpdateSpent` wrote the whole record once *per
