@@ -1270,6 +1270,11 @@ static const char *strDNSSeed[][2] = {
     {"hoboseed3", "seed3.hobonickels.info"},
     {"hoboseed4", "seed4.hobonickels.info"},
     {"cce",   "hbn.altcointech.net"},
+    // Baked-in bootstrap nodes (known good peers / explorer).
+    {"dognose",  "coins.dognose.net"},
+    {"hbnnode1", "192.183.213.223"},
+    {"hbnnode2", "92.232.112.174"},
+    {"hbnnode3", "94.23.147.205"},
 };
 
 void ThreadDNSAddressSeed(void* parg)

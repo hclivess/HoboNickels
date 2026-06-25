@@ -44,6 +44,11 @@ namespace Checkpoints
         ( 5525100, uint256("0x99202c5db266191c3bebba59873b5fb7514d5c9e8926e5099c5d36400f8a0ff4"))
         ( 5579000, uint256("0x74cd42bbe9781749a862317a21fcc97527c3e32569b4e3cd1fd59514210ed50b"))
         ( 5608000, uint256("0x37fb3b685a62047542a8345f031f8199839ebe716679dfe8fa318e8a5ea46d64"))
+        // Recent checkpoints (verified against explorer.dognose.net, June 2026).
+        ( 7000000, uint256("0x5951dafa0ca3bbe0ae77cde77e49aec3c24d7240c895009d59fc7d97ca5a8d5f"))
+        ( 7500000, uint256("0xff72f7e6be1a14ad0aa4853ca088180d8baddaa64dd5bc877356f550124eb1f9"))
+        ( 7900000, uint256("0x6bb7df798156d1029ca0704a0f808a4ed3f0af1d48685a59844cb394ab9b22fe"))
+        ( 7990000, uint256("0x5d96b92f208c0d5b5670bdeb357619f4567c022e9cfc1a5c022c11db9d0cf78f"))
         ;
 
     static MapCheckpoints mapCheckpointsTestnet =
