@@ -59,3 +59,21 @@ addnode=coins.dognose.net
 - `getblockcount`, `getblockhash <height>` — chain tip / a block hash (handy for
   generating new hardcoded checkpoints).
 - `getstakeweight`, `getmininginfo` — staking status.
+
+## Modern RPC endpoints (added)
+
+Lightweight, read-only endpoints added for parity with modern Bitcoin-style
+tooling (explorers, wallets, monitoring). All are cheap (in-memory lookups, no
+chain scans) and safe to expose:
+
+| RPC | Returns |
+| --- | --- |
+| `uptime` | Server uptime in seconds. |
+| `getblockheader <hash>` | A block's header fields (height, time, bits, difficulty, merkleroot, prev/next, PoS flags) straight from the block index — no transaction list, no block read from disk. |
+| `getblockchaininfo` | Aggregate chain state: chain (main/test), blocks, bestblockhash, PoW/PoS difficulty, money supply, chainwork, initialblockdownload. |
+| `getnetworkinfo` | version, subversion, protocolversion, timeoffset, connections, proxy, relayfee, testnet. |
+| `getmempoolinfo` | Mempool `size` (tx count) and `bytes` (serialized size). |
+| `getwalletinfo` | Active wallet: version, balance/unconfirmed/immature/stake, txcount, keypool, encrypted/locked, paytxfee. |
+
+Deliberately **not** added (computationally heavy or abuse-prone): `getblockstats`,
+`scantxoutset`, and `getchaintips` (the last scans the whole block index).

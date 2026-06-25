@@ -110,6 +110,34 @@ Value getinfo(CWallet* pWallet, const Array& params, bool fHelp)
     return obj;
 }
 
+// Wallet state (modern equivalent of the wallet half of getinfo) for the
+// active wallet.
+Value getwalletinfo(CWallet* pWallet, const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() != 0)
+        throw runtime_error(
+            "getwalletinfo\n"
+            "Returns an object with state info about the active wallet.");
+
+    Object obj;
+    obj.push_back(Pair("walletname",          pWallet->strWalletFile));
+    obj.push_back(Pair("walletversion",       pWallet->GetVersion()));
+    obj.push_back(Pair("balance",             ValueFromAmount(pWallet->GetBalance())));
+    obj.push_back(Pair("unconfirmed_balance", ValueFromAmount(pWallet->GetUnconfirmedBalance())));
+    obj.push_back(Pair("immature_balance",    ValueFromAmount(pWallet->GetImmatureBalance())));
+    obj.push_back(Pair("stake",               ValueFromAmount(pWallet->GetStake())));
+    {
+        LOCK(pWallet->cs_wallet);
+        obj.push_back(Pair("txcount",         (int)pWallet->mapWallet.size()));
+        obj.push_back(Pair("keypoololdest",   (boost::int64_t)pWallet->GetOldestKeyPoolTime()));
+        obj.push_back(Pair("keypoolsize",     (int)pWallet->GetKeyPoolSize()));
+    }
+    obj.push_back(Pair("encrypted",           pWallet->IsCrypted()));
+    obj.push_back(Pair("locked",              pWallet->IsLocked()));
+    obj.push_back(Pair("paytxfee",            ValueFromAmount(nTransactionFee)));
+    return obj;
+}
+
 Value getnewaddress(CWallet* pWallet, const Array& params, bool fHelp)
 {
     if (fHelp || params.size() > 1)

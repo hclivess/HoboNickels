@@ -230,8 +230,14 @@ extern json_spirit::Value getblockcount(CWallet* pWallet, const json_spirit::Arr
 extern json_spirit::Value getdifficulty(CWallet* pWallet, const json_spirit::Array& params, bool fHelp);
 extern json_spirit::Value settxfee(CWallet* pWallet, const json_spirit::Array& params, bool fHelp);
 extern json_spirit::Value getrawmempool(CWallet* pWallet, const json_spirit::Array& params, bool fHelp);
+extern json_spirit::Value getmempoolinfo(CWallet* pWallet, const json_spirit::Array& params, bool fHelp);
 extern json_spirit::Value getblockhash(CWallet* pWallet, const json_spirit::Array& params, bool fHelp);
 extern json_spirit::Value getblock(CWallet* pWallet, const json_spirit::Array& params, bool fHelp);
+extern json_spirit::Value getblockheader(CWallet* pWallet, const json_spirit::Array& params, bool fHelp);
+extern json_spirit::Value getblockchaininfo(CWallet* pWallet, const json_spirit::Array& params, bool fHelp);
+extern json_spirit::Value getnetworkinfo(CWallet* pWallet, const json_spirit::Array& params, bool fHelp);
+extern json_spirit::Value getwalletinfo(CWallet* pWallet, const json_spirit::Array& params, bool fHelp);
+extern json_spirit::Value uptime(CWallet* pWallet, const json_spirit::Array& params, bool fHelp);
 extern json_spirit::Value gettxoutsetinfo(CWallet* pWallet, const json_spirit::Array& params, bool fHelp);
 extern json_spirit::Value gettxout(CWallet* pWallet, const json_spirit::Array& params, bool fHelp);
 extern json_spirit::Value getblockbynumber(CWallet* pWallet, const json_spirit::Array& params, bool fHelp);

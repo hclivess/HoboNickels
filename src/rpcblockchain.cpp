@@ -188,6 +188,81 @@ Value getdifficulty(CWallet* pWallet, const Array& params, bool fHelp)
     return obj;
 }
 
+// Lightweight block header lookup (no transaction list, no block read from disk;
+// all fields come from the in-memory block index).
+Value getblockheader(CWallet* pWallet, const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() != 1)
+        throw runtime_error(
+            "getblockheader <hash>\n"
+            "Returns the header fields of block <hash> (no transaction list).");
+
+    uint256 hash(params[0].get_str());
+    if (mapBlockIndex.count(hash) == 0)
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block not found");
+
+    CBlockIndex* pblockindex = mapBlockIndex[hash];
+
+    Object result;
+    result.push_back(Pair("hash",            pblockindex->GetBlockHash().GetHex()));
+    result.push_back(Pair("confirmations",   (int)(pblockindex->IsInMainChain() ? nBestHeight - pblockindex->nHeight + 1 : -1)));
+    result.push_back(Pair("height",          pblockindex->nHeight));
+    result.push_back(Pair("version",         pblockindex->nVersion));
+    result.push_back(Pair("merkleroot",      pblockindex->hashMerkleRoot.GetHex()));
+    result.push_back(Pair("time",            (boost::int64_t)pblockindex->GetBlockTime()));
+    result.push_back(Pair("bits",            strprintf("%08x", pblockindex->nBits)));
+    result.push_back(Pair("difficulty",      GetDifficulty(pblockindex)));
+    result.push_back(Pair("mint",            ValueFromAmount(pblockindex->nMint)));
+    result.push_back(Pair("chaintrust",      leftTrim(pblockindex->nChainTrust.GetHex(), '0')));
+    result.push_back(Pair("flags",           strprintf("%s%s", pblockindex->IsProofOfStake()? "proof-of-stake" : "proof-of-work", pblockindex->GeneratedStakeModifier()? " stake-modifier": "")));
+    result.push_back(Pair("proofhash",       pblockindex->IsProofOfStake()? pblockindex->hashProofOfStake.GetHex() : pblockindex->GetBlockHash().GetHex()));
+    if (pblockindex->pprev)
+        result.push_back(Pair("previousblockhash", pblockindex->pprev->GetBlockHash().GetHex()));
+    if (pblockindex->pnext)
+        result.push_back(Pair("nextblockhash", pblockindex->pnext->GetBlockHash().GetHex()));
+    return result;
+}
+
+// Aggregate chain state (modern equivalent of the chain half of getinfo).
+Value getblockchaininfo(CWallet* pWallet, const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() != 0)
+        throw runtime_error(
+            "getblockchaininfo\n"
+            "Returns an object with state info about the block chain.");
+
+    Object obj;
+    obj.push_back(Pair("chain",                 string(fTestNet ? "test" : "main")));
+    obj.push_back(Pair("blocks",                (int)nBestHeight));
+    obj.push_back(Pair("bestblockhash",         hashBestChain.GetHex()));
+    obj.push_back(Pair("difficulty",            GetDifficulty()));
+    obj.push_back(Pair("difficulty_pos",        GetDifficulty(GetLastBlockIndex(pindexBest, true))));
+    obj.push_back(Pair("moneysupply",           ValueFromAmount(pindexBest->nMoneySupply)));
+    obj.push_back(Pair("chainwork",             pindexBest->nChainTrust.GetHex()));
+    obj.push_back(Pair("initialblockdownload",  IsInitialBlockDownload()));
+    return obj;
+}
+
+// Memory-pool summary (size and serialized bytes).
+Value getmempoolinfo(CWallet* pWallet, const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() != 0)
+        throw runtime_error(
+            "getmempoolinfo\n"
+            "Returns details on the active state of the transaction memory pool.");
+
+    int64_t nBytes = 0;
+    {
+        LOCK(mempool.cs);
+        for (const std::pair<const uint256, CTransaction>& e : mempool.mapTx)
+            nBytes += ::GetSerializeSize(e.second, SER_NETWORK, PROTOCOL_VERSION);
+    }
+    Object obj;
+    obj.push_back(Pair("size",  (boost::int64_t)mempool.size()));
+    obj.push_back(Pair("bytes", (boost::int64_t)nBytes));
+    return obj;
+}
+
 
 Value settxfee(CWallet* pWallet, const Array& params, bool fHelp)
 {

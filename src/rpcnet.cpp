@@ -13,6 +13,9 @@
 using namespace json_spirit;
 using namespace std;
 
+// Process start time (captured at load), for the uptime RPC.
+static const int64_t nNodeStartTime = GetTime();
+
 Value getconnectioncount(CWallet* pWallet, const Array& params, bool fHelp)
 {
     if (fHelp || params.size() != 0)
@@ -22,6 +25,43 @@ Value getconnectioncount(CWallet* pWallet, const Array& params, bool fHelp)
 
     LOCK(cs_vNodes);
     return (int)vNodes.size();
+}
+
+Value uptime(CWallet* pWallet, const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() != 0)
+        throw runtime_error(
+            "uptime\n"
+            "Returns the total uptime of the server in seconds.");
+
+    return (boost::int64_t)(GetTime() - nNodeStartTime);
+}
+
+// Network/version state (modern equivalent of the network half of getinfo).
+Value getnetworkinfo(CWallet* pWallet, const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() != 0)
+        throw runtime_error(
+            "getnetworkinfo\n"
+            "Returns an object with state info about network connectivity.");
+
+    proxyType proxy;
+    GetProxy(NET_IPV4, proxy);
+
+    Object obj;
+    obj.push_back(Pair("version",         FormatFullVersion()));
+    obj.push_back(Pair("subversion",      FormatSubVersion(CLIENT_NAME, CLIENT_VERSION, std::vector<string>())));
+    obj.push_back(Pair("protocolversion", (int)PROTOCOL_VERSION));
+    obj.push_back(Pair("timeoffset",      (boost::int64_t)GetTimeOffset()));
+    {
+        LOCK(cs_vNodes);
+        obj.push_back(Pair("connections", (int)vNodes.size()));
+    }
+    obj.push_back(Pair("proxy",           (proxy.first.IsValid() ? proxy.first.ToStringIPPort() : string())));
+    obj.push_back(Pair("localip",         addrSeenByPeer.ToStringIP()));
+    obj.push_back(Pair("relayfee",        ValueFromAmount(MIN_RELAY_TX_FEE)));
+    obj.push_back(Pair("testnet",         fTestNet));
+    return obj;
 }
 
 Value ping(CWallet* pWallet, const Array& params, bool fHelp)
