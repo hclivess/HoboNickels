@@ -53,6 +53,13 @@ addnode=coins.dognose.net
 | `combinethreshold` (RPC) | Combine staking outputs below this size. |
 | Stake-For-Charity (GUI / RPC) | Donate a configurable percentage of each stake to an address, between min/max amounts. |
 
+## GUI (Qt wallet)
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `-uitheme=<theme>` | **light** | Colour theme of the Qt wallet: `light`, `dark`, or `native` (the pre-modernization platform look). High-DPI scaling is always on. See [gui.md](gui.md). |
+| `-lang=<xx>` | system | UI language. |
+
 ## RPC quick reference (peers / sync)
 
 - `getpeerinfo`, `getconnectioncount` — connection state.
