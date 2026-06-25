@@ -11,6 +11,8 @@
 - **[staking-performance.md](staking-performance.md)** — how proof-of-stake
   minting works, the performance optimizations applied, deferred ideas (which
   must never omit mempool transactions), and the consensus off-limits zone.
+- **[performance.md](performance.md)** — daemon sync/validation/memory
+  optimizations: what's applied, the deferred roadmap, and the off-limits zone.
 - **[gui.md](gui.md)** — the Qt5 wallet: modernized look-and-feel (high-DPI,
   Fusion style, light/dark themes via `-uitheme`), the RPC console, and staking.
 

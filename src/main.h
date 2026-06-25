@@ -890,6 +890,14 @@ public:
     mutable int nDoS;
     bool DoS(int nDoSIn, bool fIn) const { nDoS += nDoSIn; return fIn; }
 
+    // memory-only: cached scrypt block hash. GetHash() runs the memory-hard scrypt
+    // (N=1024, ~131 KB) and is called several times per block during IBD; the header
+    // is immutable for a received/finalized block, so memoize it. Invalidated in
+    // SetNull(), on deserialize, and at the few header-mutation sites (UpdateTime,
+    // SignPoSBlock, the genesis grind). Any new header mutation MUST clear fHashCached.
+    mutable uint256 hashCache;
+    mutable bool fHashCached;
+
     CBlock()
     {
         SetNull();
@@ -916,6 +924,8 @@ public:
             const_cast<CBlock*>(this)->vtx.clear();
             const_cast<CBlock*>(this)->vchBlockSig.clear();
         }
+        if (fRead)
+            const_cast<CBlock*>(this)->fHashCached = false; // header bytes just changed
     )
 
     void SetNull()
@@ -930,6 +940,7 @@ public:
         vchBlockSig.clear();
         vMerkleTree.clear();
         nDoS = 0;
+        fHashCached = false;
     }
 
     bool IsNull() const
@@ -939,7 +950,12 @@ public:
 
     uint256 GetHash() const
     {
-        return scrypt_blockhash(CVOIDBEGIN(nVersion));
+        if (!fHashCached)
+        {
+            hashCache = scrypt_blockhash(CVOIDBEGIN(nVersion));
+            fHashCached = true;
+        }
+        return hashCache;
     }
 
     int64_t GetBlockTime() const

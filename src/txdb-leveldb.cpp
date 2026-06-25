@@ -38,6 +38,10 @@ static leveldb::Options GetOptions() {
     // syncing (capped so we don't balloon memory on huge -dbcache values).
     options.write_buffer_size = std::min<size_t>(nCacheBytes / 4, (size_t)64 * 1048576);
     options.filter_policy = leveldb::NewBloomFilterPolicy(10);
+    // The txindex stores 32-byte hashes and the block index — effectively
+    // incompressible — so Snappy just burns CPU on every SST read/write. Disable
+    // it. (Compression type is stored per-SST, so existing data still reads fine.)
+    options.compression = leveldb::kNoCompression;
     return options;
 }
 

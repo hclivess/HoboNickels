@@ -124,6 +124,7 @@ Everything lives under [`doc/`](doc/):
 | [configuration.md](doc/configuration.md) | Runtime options (sync, staking, networking, GUI, RPC) |
 | [gui.md](doc/gui.md) | The Qt5 wallet — theming, high-DPI, RPC console |
 | [staking-performance.md](doc/staking-performance.md) | How PoS minting works and the performance work |
+| [performance.md](doc/performance.md) | Sync/validation/memory optimizations + the deferred roadmap |
 
 Brand and UI graphics for designers are in [`media-kit/`](media-kit/).
 
