@@ -270,7 +270,7 @@ int main(int argc, char *argv[])
                 window.setWalletManager(pWalletManager);
 
                 // Create wallet models for each wallet and add it.
-                BOOST_FOREACH(const wallet_map::value_type& item, pWalletManager->GetWalletMap())
+                for (const wallet_map::value_type& item : pWalletManager->GetWalletMap())
                 {
                     QString name(item.first.c_str());
                     if (name == "") name = "~Default";

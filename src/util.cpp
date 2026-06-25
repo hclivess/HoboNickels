@@ -28,7 +28,6 @@ namespace boost {
 #include <boost/lexical_cast.hpp>
 #include <boost/variant/get.hpp>
 #include <boost/algorithm/string.hpp>
-#include <boost/foreach.hpp>
 #include <boost/thread.hpp>
 #include <openssl/crypto.h>
 #include <openssl/rand.h>
@@ -440,7 +439,7 @@ static const signed char phexdigit[256] =
 
 bool IsHex(const string& str)
 {
-    BOOST_FOREACH(unsigned char c, str)
+    for (unsigned char c : str)
     {
         if (phexdigit[c] < 0)
             return false;
@@ -516,7 +515,7 @@ void ParseParameters(int argc, const char* const argv[])
     }
 
     // New 0.6 features:
-    BOOST_FOREACH(const PAIRTYPE(string,string)& entry, mapArgs)
+    for (const PAIRTYPE(string,string)& entry : mapArgs)
     {
         string name = entry.first;
 
@@ -926,7 +925,7 @@ int64_t DecodeDumpTime(const string& s)
 string EncodeDumpString(const string &str)
 {
     std::stringstream ret;
-    BOOST_FOREACH(unsigned char c, str) {
+    for (unsigned char c : str) {
         if (c <= 32 || c >= 128 || c == '%') {
             ret << '%' << HexStr(&c, &c + 1);
         } else {
@@ -1004,7 +1003,7 @@ vector<string> GetFilesAtPath(const boost::filesystem::path& _path, unsigned int
     {
         vector<boost::filesystem::path> vPaths;
         copy(boost::filesystem::directory_iterator(_path), boost::filesystem::directory_iterator(), back_inserter(vPaths));
-        BOOST_FOREACH(const boost::filesystem::path& pFile, vPaths)
+        for (const boost::filesystem::path& pFile : vPaths)
         {
             if (((flags & file_option_flags::REGULAR_FILES) && boost::filesystem::is_regular_file(pFile)) ||
                 ((flags & file_option_flags::DIRECTORIES) && boost::filesystem::is_directory(pFile)))
@@ -1313,7 +1312,7 @@ void AddTimeData(const CNetAddr& ip, int64_t nTime)
             {
                 // If nobody has a time different than ours but within 5 minutes of ours, give a warning
                 bool fMatch = false;
-                BOOST_FOREACH(int64_t nOffset, vSorted)
+                for (int64_t nOffset : vSorted)
                     if (nOffset != 0 && abs64(nOffset) < 5 * 60)
                         fMatch = true;
 
@@ -1328,7 +1327,7 @@ void AddTimeData(const CNetAddr& ip, int64_t nTime)
             }
         }
         if (fDebug) {
-            BOOST_FOREACH(int64_t n, vSorted)
+            for (int64_t n : vSorted)
                 LogPrintf("%+d  ", n);
             LogPrintf("|  ");
         }

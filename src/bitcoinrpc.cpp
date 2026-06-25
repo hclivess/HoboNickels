@@ -15,7 +15,6 @@
 #include <boost/asio/ip/v6_only.hpp>
 #include <boost/bind.hpp>
 #include <boost/filesystem.hpp>
-#include <boost/foreach.hpp>
 #include <boost/iostreams/concepts.hpp>
 #include <boost/iostreams/stream.hpp>
 #include <boost/algorithm/string.hpp>
@@ -23,7 +22,9 @@
 #include <boost/asio/ssl.hpp>
 #include <boost/filesystem/fstream.hpp>
 #include <boost/shared_ptr.hpp>
+#include <functional>
 #include <list>
+#include <memory>
 
 using namespace std;
 using namespace boost;
@@ -56,7 +57,7 @@ void RPCTypeCheck(const Array& params,
                   bool fAllowNull)
 {
     unsigned int i = 0;
-    BOOST_FOREACH(Value_type t, typesExpected)
+    for (Value_type t : typesExpected)
     {
         if (params.size() <= i)
             break;
@@ -76,7 +77,7 @@ void RPCTypeCheck(const Object& o,
                   const map<string, Value_type>& typesExpected,
                   bool fAllowNull)
 {
-    BOOST_FOREACH(const PAIRTYPE(string, Value_type)& t, typesExpected)
+    for (const PAIRTYPE(string, Value_type)& t : typesExpected)
     {
         const Value& v = find_value(o, t.first);
         if (!fAllowNull && v.type() == null_type)
@@ -351,7 +352,7 @@ string HTTPPost(const string& strMsg, const map<string,string>& mapRequestHeader
       << "Content-Length: " << strMsg.size() << "\r\n"
       << "Connection: close\r\n"
       << "Accept: application/json\r\n";
-    BOOST_FOREACH(const PAIRTYPE(string, string)& item, mapRequestHeaders)
+    for (const PAIRTYPE(string, string)& item : mapRequestHeaders)
         s << item.first << ": " << item.second << "\r\n";
     s << "\r\n" << strMsg;
 
@@ -566,7 +567,7 @@ bool ClientAllowed(const boost::asio::ip::address& address)
 
     const string strAddress = address.to_string();
     const vector<string>& vAllow = mapMultiArgs["-rpcallowip"];
-    BOOST_FOREACH(string strAllow, vAllow)
+    for (string strAllow : vAllow)
         if (WildcardMatch(strAddress, strAllow))
             return true;
     return false;
@@ -718,7 +719,7 @@ static void RPCListen(boost::shared_ptr< basic_socket_acceptor<Protocol, SocketA
             conn->peer,
             boost::bind(&RPCAcceptHandler<Protocol, SocketAcceptorService>,
                 acceptor,
-                boost::ref(context),
+                std::ref(context),
                 fUseSSL,
                 conn,
                 boost::asio::placeholders::error));
@@ -1085,7 +1086,7 @@ json_spirit::Value CRPCTable::execute(const std::string &strMethod, const json_s
         !pcmd->okSafeMode)
         throw JSONRPCError(RPC_FORBIDDEN_BY_SAFE_MODE, string("Safe mode: ") + strWarning);
 
-    boost::shared_ptr<CWallet> spWallet;
+    std::shared_ptr<CWallet> spWallet;
         if (!pWallet)
         {
             try
@@ -1212,7 +1213,7 @@ Array RPCConvertValues(const std::string &strMethod, const std::vector<std::stri
         return params;
     }
 
-    BOOST_FOREACH(const std::string &param, strParams)
+    for (const std::string &param : strParams)
         params.push_back(param);
 
     int n = params.size();

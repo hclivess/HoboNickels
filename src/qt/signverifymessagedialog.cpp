@@ -134,7 +134,7 @@ void SignVerifyMessageDialog::on_signMessageButton_SM_clicked()
     CKey key;
     CKey tkey;
     bool fwalletFound=false;
-    BOOST_FOREACH(const wallet_map::value_type& item, pWalletManager->GetWalletMap())
+    for (const wallet_map::value_type& item : pWalletManager->GetWalletMap())
     {
 
       pwalletMain = pWalletManager->GetWallet(item.first.c_str()).get();

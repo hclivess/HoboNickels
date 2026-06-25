@@ -64,7 +64,7 @@ CScript ParseScript(string s)
     vector<string> words;
     split(words, s, is_any_of(" \t\n"), token_compress_on);
 
-    BOOST_FOREACH(string w, words)
+    for (string w : words)
     {
         if (all(w, is_digit()) ||
             (starts_with(w, "-") && all(string(w.begin()+1, w.end()), is_digit())))

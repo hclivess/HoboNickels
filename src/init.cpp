@@ -13,6 +13,7 @@
 #include "ui_interface.h"
 #include "timer.h"
 #include "checkpoints.h"
+#include <memory>
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
 #include <boost/interprocess/sync/file_lock.hpp>
@@ -343,7 +344,7 @@ bool LoadWallets(ostringstream& strErrors)
 
     // Get wallet names from -usewallet parameters
     set<string> setWalletNames;
-    BOOST_FOREACH(const string& name, mapMultiArgs["-usewallet"])
+    for (const string& name : mapMultiArgs["-usewallet"])
     {
         if (name.size() == 0) continue;
         if (!CWalletManager::IsValidName(name))
@@ -371,7 +372,7 @@ bool LoadWallets(ostringstream& strErrors)
     }
 
     // If there are -nousewallet parameters, remove those wallets from our set
-    BOOST_FOREACH(const string& name, mapMultiArgs["-nousewallet"])
+    for (const string& name : mapMultiArgs["-nousewallet"])
     {
         if (name.size() == 0) continue;
         if (!CWalletManager::IsValidName(name))
@@ -402,7 +403,7 @@ bool LoadWallets(ostringstream& strErrors)
     pwalletMain = pWalletManager->GetDefaultWallet().get();
 
     // Be tolerant on nondefault wallets. Just report errors but don't die.
-    BOOST_FOREACH(const string& strWalletName, setWalletNames)
+    for (const string& strWalletName : setWalletNames)
     {
         ostringstream strLoadErrors;
         if (!pWalletManager->LoadWallet(strWalletName, strLoadErrors, fRescan, fUpgrade, nMaxVersion))
@@ -735,7 +736,7 @@ bool AppInit2()
 
     if (mapArgs.count("-onlynet")) {
         std::set<enum Network> nets;
-        BOOST_FOREACH(std::string snet, mapMultiArgs["-onlynet"]) {
+        for (std::string snet : mapMultiArgs["-onlynet"]) {
             enum Network net = ParseNetwork(snet);
             if (net == NET_UNROUTABLE)
                 return InitError(strprintf(_("Unknown network specified in -onlynet: '%s'"), snet));
@@ -791,7 +792,7 @@ bool AppInit2()
     {
         std::string strError;
         if (mapArgs.count("-bind")) {
-            BOOST_FOREACH(std::string strBind, mapMultiArgs["-bind"]) {
+            for (std::string strBind : mapMultiArgs["-bind"]) {
                 CService addrBind;
                 if (!Lookup(strBind.c_str(), addrBind, GetListenPort(), false))
                     return InitError(strprintf(_("Cannot resolve -bind address: '%s'"), strBind));
@@ -811,7 +812,7 @@ bool AppInit2()
 
     if (mapArgs.count("-externalip"))
     {
-        BOOST_FOREACH(string strAddr, mapMultiArgs["-externalip"]) {
+        for (string strAddr : mapMultiArgs["-externalip"]) {
             CService addrLocal(strAddr, GetListenPort(), fNameLookup);
             if (!addrLocal.IsValid())
                 return InitError(strprintf(_("Cannot resolve -externalip address: '%s'"), strAddr));
@@ -827,7 +828,7 @@ bool AppInit2()
             InitError(_("Unable to sign checkpoint, wrong checkpointkey?\n"));
     }
 
-    BOOST_FOREACH(string strDest, mapMultiArgs["-seednode"])
+    for (string strDest : mapMultiArgs["-seednode"])
         AddOneShot(strDest);
 
     // TODO: replace this by DNSseed
@@ -912,9 +913,9 @@ bool AppInit2()
             // Set the reservebalance the same for each wallet that was loaded.
             // Individual Wallets can be set using the rpc command after loading is complete
             vector<string> vstrNames;
-            vector<boost::shared_ptr<CWallet> > vpWallets;
+            vector<std::shared_ptr<CWallet> > vpWallets;
 
-            BOOST_FOREACH(const wallet_map::value_type& item, pWalletManager->GetWalletMap())
+            for (const wallet_map::value_type& item : pWalletManager->GetWalletMap())
             {
                vstrNames.push_back(item.first);
                vpWallets.push_back(item.second);
@@ -935,7 +936,7 @@ bool AppInit2()
     {
         uiInterface.InitMessage(_("Importing blockchain data file."));
 
-        BOOST_FOREACH(string strFile, mapMultiArgs["-loadblock"])
+        for (string strFile : mapMultiArgs["-loadblock"])
         {
             FILE *file = fopen(strFile.c_str(), "rb");
             if (file)
@@ -983,7 +984,7 @@ bool AppInit2()
     LogPrintf("mapBlockIndex.size() = %u\n",   mapBlockIndex.size());
     LogPrintf("nBestHeight = %d\n",            nBestHeight);
 
-    BOOST_FOREACH(const wallet_map::value_type& item, pWalletManager->GetWalletMap())
+    for (const wallet_map::value_type& item : pWalletManager->GetWalletMap())
        {
            LogPrintf("Setting properties for wallet \"%s\"...\n", item.first);
            LogPrintf(" setKeyPool.size() = %u\n", item.second->setKeyPool.size());

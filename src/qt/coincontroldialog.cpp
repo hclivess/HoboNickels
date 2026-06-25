@@ -203,7 +203,7 @@ void CoinControlDialog::customSelectCoins()
     map<QString, vector<COutput> > mapCoins;
     model->listCoins(mapCoins);
 
-    BOOST_FOREACH(PAIRTYPE(QString, vector<COutput>) coins, mapCoins)
+    for (PAIRTYPE(QString, vector<COutput>) coins : mapCoins)
     {
         QTreeWidgetItem *itemWalletAddress = new QTreeWidgetItem();
         QTreeWidgetItem *itemOutput;
@@ -216,7 +216,7 @@ void CoinControlDialog::customSelectCoins()
         itemOutput->setFlags(flgCheckbox);
         itemOutput->setCheckState(COLUMN_CHECKBOX,Qt::Unchecked);
 
-        BOOST_FOREACH(const COutput& out, coins.second)
+        for (const COutput& out : coins.second)
         {
             // transaction hash
             uint256 txhash = out.tx->GetHash();
@@ -537,7 +537,7 @@ void CoinControlDialog::updateLabels(WalletModel *model, QDialog* dialog)
     coinControl->ListSelected(vCoinControl);
     model->getOutputs(vCoinControl, vOutputs);
 
-    BOOST_FOREACH(const COutput& out, vOutputs)
+    for (const COutput& out : vOutputs)
     {
         // Quantity
         nQuantity++;
@@ -680,7 +680,7 @@ void CoinControlDialog::updateView()
 
     qint64 nYearlyPercent = GetProofOfStakeReward(0, GetLastBlockIndex(pindexBest, true)->nBits, GetLastBlockIndex(pindexBest, true)->nTime, true);
 
-    BOOST_FOREACH(PAIRTYPE(QString, vector<COutput>) coins, mapCoins)
+    for (PAIRTYPE(QString, vector<COutput>) coins : mapCoins)
     {
         QTreeWidgetItem *itemWalletAddress = new QTreeWidgetItem();
         QString sWalletAddress = coins.first;
@@ -719,7 +719,7 @@ void CoinControlDialog::updateView()
         quint64 nTxWeightSum = 0, nPotentialStakeSum = 0;
         qint64 nTime = GetTime();
 
-        BOOST_FOREACH(const COutput& out, coins.second)
+        for (const COutput& out : coins.second)
         {
             int nInputSize = 148; // 180 if uncompressed public key
             nValue = out.tx->vout[out.i].nValue;
