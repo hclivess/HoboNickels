@@ -28,12 +28,17 @@ network-compatible**, while everything around them was brought up to date:
   Berkeley DB · Qt 5, built with **CMake** (the old autotools/`.pro` system is retired).
 - ⚡ **Faster sync, lower overhead** — libsecp256k1 signature verification (OpenSSL
   fallback, no fork), dynamic checkpointing, and tuned LevelDB caching.
-- 🖥️ **Modern Qt5 wallet** — high-DPI aware, light/dark themes (`-uitheme`), and a
-  crisp redrawn icon set.
+- 🖥️ **Modern Qt5 wallet** — high-DPI aware, light/dark themes (`-uitheme`), a fully
+  redrawn flat icon set and coin-render branding (no 2014 artwork left).
+- 🪙 **Smarter staking** — autocombine actually consolidates ripe dust and split no
+  longer fragments stakes; the per-block staking metadata cache cuts disk I/O. All
+  wallet policy — no consensus change.
 - 🔌 **Modern RPC** — lightweight read-only endpoints (`getblockchaininfo`,
   `getnetworkinfo`, `getwalletinfo`, `getblockheader`, `getmempoolinfo`, `uptime`).
 - ✅ **CI & Docker** — every change is built and tested on Linux + Windows + Docker.
 
+> **Latest release: [v2.0.6-modern](https://github.com/hclivess/HoboNickels/releases/latest)** —
+> working autocombine + saner split defaults, on top of a fully modernized UI.
 > See [`doc/MODERNIZATION.md`](doc/MODERNIZATION.md) for the full list of changes.
 
 ## Download
@@ -100,8 +105,9 @@ networking, GUI theme) are documented in
 - **Proof-of-stake minting** with **Stake-For-Charity** — donate a configurable
   percentage of each stake to an address.
 - **Multi-wallet** — dynamically load and unload wallets at runtime.
-- **Coin control** with configurable `splitthreshold` / `combinethreshold` for
-  managing stake-output sizes.
+- **Automatic stake-output management** — autocombine consolidates ripe small
+  outputs and split keeps them a sensible size, plus coin control; all tunable via
+  `splitthreshold` / `combinethreshold`.
 - **Built-in block browser** and **network graph**.
 - At-a-glance **peer, stake, and block** information.
 - Modern **Qt5 GUI**: high-DPI, light/dark/native themes (`-uitheme`).
