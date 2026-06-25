@@ -85,7 +85,7 @@ networking, GUI theme) are documented in
 | **Algorithm** | Scrypt |
 | **Type** | Hybrid Proof-of-Work + Proof-of-Stake |
 | **PoW block reward** | 5 HBN |
-| **Max supply** | 120,000,000 HBN |
+| **Supply** | No fixed cap — proof-of-stake is inflationary |
 | **Confirmations** | 25 |
 | **Difficulty retarget** | Linear |
 | **Stake reward** | 20% min → 100% max annual, capped at 250 HBN |

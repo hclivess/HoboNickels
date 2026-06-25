@@ -43,7 +43,10 @@ static const unsigned int MAX_INV_SZ = 50000;
 static const int64_t MIN_TX_FEE = 0.1 * CENT;
 /** Fees smaller than this (in satoshi) are considered zero fee (for relaying) */
 static const int64_t MIN_RELAY_TX_FEE = 0.1 * CENT;
-/** No amount larger than this (in satoshi) is valid */
+/** No single amount larger than this (in satoshi) is valid. This is a consensus
+ *  overflow / range bound enforced by MoneyRange() in transaction and block
+ *  validation -- NOT a total-supply cap. HoboNickels is proof-of-stake and
+ *  inflationary, with no fixed maximum supply. Changing this value forks the chain. */
 static const int64_t MAX_MONEY = 120000000 * COIN;
 /** Base Rate for Proof of Work Reward */
 static const int64_t MAX_MINT_PROOF_OF_WORK = 5 * COIN;
