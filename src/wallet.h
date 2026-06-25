@@ -109,6 +109,15 @@ private:
     // selected coins metadata
     std::map<std::pair<uint256, unsigned int>, std::pair<std::pair<CTxIndex, std::pair<const CWalletTx*,unsigned int> >, std::pair<CBlock, uint64_t> > > mapMeta;
 
+    // Persistent cache of (source-block file, pos) => (block header, stake modifier).
+    // The mapMeta cache above is rebuilt on every attached block; this one survives
+    // those rebuilds so a new block does not force re-reading every staking coin's
+    // source block from disk and re-walking its stake modifier. Source blocks of
+    // mature staking coins are buried and immutable, so the cached header/modifier
+    // are identical to a fresh read; the cache is pruned to the current coin set on
+    // each rebuild and cleared wholesale on reorg (see ClearStakeMetaCache).
+    std::map<std::pair<unsigned int, unsigned int>, std::pair<CBlock, uint64_t> > mapStakeMetaCache;
+
 public:
     /// Main wallet lock.
     ///  This lock protects all the fields added by CWallet
@@ -400,6 +409,11 @@ public:
 
     void SetCoinsDataActual(bool fCoinsDataActualSet);
     bool GetCoinsDataActual() { LOCK(cs_wallet); return fCoinsDataActual; }
+
+    // Drop the persistent staking metadata cache. Called on reorg: a disconnected
+    // block could in principle change a cached source block's stake modifier, so the
+    // cache is rebuilt from disk afterwards rather than trusted across the reorg.
+    void ClearStakeMetaCache() { LOCK(cs_wallet); mapStakeMetaCache.clear(); }
 
     void FixSpentCoins(int& nMismatchSpent, int64_t& nBalanceInQuestion, int& nOrphansFound, bool fCheckOnly = false);
     void DisableTransaction(const CTransaction &tx);

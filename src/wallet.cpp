@@ -1831,24 +1831,44 @@ bool CWallet::GetStakeWeight(const CKeyStore& keystore, uint64_t& nMinWeight, ui
             {
                 CTxIndex txindex;
                 CBlock block;
+                // Repopulated from cache hits + disk misses this pass, then swapped
+                // into mapStakeMetaCache so the cache tracks exactly the current coins.
+                std::map<std::pair<unsigned int, unsigned int>, std::pair<CBlock, uint64_t> > mapNewStakeMetaCache;
                 for(CoinsSet::iterator pcoin = setCoins.begin(); pcoin != setCoins.end(); pcoin++)
                 {
                     // Load transaction index item
                     if (!txdb.ReadTxIndex(pcoin->first->GetHash(), txindex))
                         continue;
 
-                    // Read block header
-                    if (!block.ReadFromDisk(txindex.pos.nFile, txindex.pos.nBlockPos, false))
-                        continue;
-
+                    // Resolve the source block header + stake modifier. Both are
+                    // immutable for a buried block, so reuse the persistent cache
+                    // (keyed on the block's disk position) and skip the disk read and
+                    // modifier walk on a hit; the cached values are byte-identical to a
+                    // fresh read. Cache is cleared on reorg (ClearStakeMetaCache).
+                    std::pair<unsigned int, unsigned int> blockPos(txindex.pos.nFile, txindex.pos.nBlockPos);
                     uint64_t nStakeModifier = 0;
-                    if (!GetKernelStakeModifier(block.GetHash(), nStakeModifier))
-                        continue;
+                    std::map<std::pair<unsigned int, unsigned int>, std::pair<CBlock, uint64_t> >::iterator miMeta = mapStakeMetaCache.find(blockPos);
+                    if (miMeta != mapStakeMetaCache.end())
+                    {
+                        block = miMeta->second.first;
+                        nStakeModifier = miMeta->second.second;
+                    }
+                    else
+                    {
+                        // Read block header
+                        if (!block.ReadFromDisk(txindex.pos.nFile, txindex.pos.nBlockPos, false))
+                            continue;
+
+                        if (!GetKernelStakeModifier(block.GetHash(), nStakeModifier))
+                            continue;
+                    }
+                    mapNewStakeMetaCache[blockPos] = std::make_pair(block, nStakeModifier);
 
                     // Add meta record
                     // (txid, vout.n) => ((txindex, (tx, vout.n)), (block, modifier))
                     mapMeta[make_pair(pcoin->first->GetHash(), pcoin->second)] = make_pair(make_pair(txindex, *pcoin), make_pair(block, nStakeModifier));
                 }
+                mapStakeMetaCache.swap(mapNewStakeMetaCache);
             }
             LogPrint("coinstake", "----GetStakeWeight: %zu meta items loaded for %zu coins for wallet %s-----\n", mapMeta.size(), setCoins.size(),strWalletFile.c_str());
             fCoinsDataActual = true;
@@ -2057,24 +2077,44 @@ bool CWallet::CreateCoinStake(const CKeyStore& keystore, unsigned int nBits, int
             {
                 CTxIndex txindex;
                 CBlock block;
+                // Repopulated from cache hits + disk misses this pass, then swapped
+                // into mapStakeMetaCache so the cache tracks exactly the current coins.
+                std::map<std::pair<unsigned int, unsigned int>, std::pair<CBlock, uint64_t> > mapNewStakeMetaCache;
                 for(CoinsSet::iterator pcoin = setCoins.begin(); pcoin != setCoins.end(); pcoin++)
                 {
                     // Load transaction index item
                     if (!txdb.ReadTxIndex(pcoin->first->GetHash(), txindex))
                         continue;
 
-                    // Read block header
-                    if (!block.ReadFromDisk(txindex.pos.nFile, txindex.pos.nBlockPos, false))
-                        continue;
-
+                    // Resolve the source block header + stake modifier. Both are
+                    // immutable for a buried block, so reuse the persistent cache
+                    // (keyed on the block's disk position) and skip the disk read and
+                    // modifier walk on a hit; the cached values are byte-identical to a
+                    // fresh read. Cache is cleared on reorg (ClearStakeMetaCache).
+                    std::pair<unsigned int, unsigned int> blockPos(txindex.pos.nFile, txindex.pos.nBlockPos);
                     uint64_t nStakeModifier = 0;
-                    if (!GetKernelStakeModifier(block.GetHash(), nStakeModifier))
-                        continue;
+                    std::map<std::pair<unsigned int, unsigned int>, std::pair<CBlock, uint64_t> >::iterator miMeta = mapStakeMetaCache.find(blockPos);
+                    if (miMeta != mapStakeMetaCache.end())
+                    {
+                        block = miMeta->second.first;
+                        nStakeModifier = miMeta->second.second;
+                    }
+                    else
+                    {
+                        // Read block header
+                        if (!block.ReadFromDisk(txindex.pos.nFile, txindex.pos.nBlockPos, false))
+                            continue;
+
+                        if (!GetKernelStakeModifier(block.GetHash(), nStakeModifier))
+                            continue;
+                    }
+                    mapNewStakeMetaCache[blockPos] = std::make_pair(block, nStakeModifier);
 
                     // Add meta record
                     // (txid, vout.n) => ((txindex, (tx, vout.n)), (block, modifier))
                     mapMeta[make_pair(pcoin->first->GetHash(), pcoin->second)] = make_pair(make_pair(txindex, *pcoin), make_pair(block, nStakeModifier));
                 }
+                mapStakeMetaCache.swap(mapNewStakeMetaCache);
             }
 
             LogPrint("coinstake", "----CreateCoinStake: %zu meta items loaded for %zu coins for wallet %s-----\n", mapMeta.size(), setCoins.size(),strWalletFile.c_str());
