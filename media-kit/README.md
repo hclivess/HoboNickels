@@ -78,9 +78,14 @@ Small status-bar / transaction-list glyphs — these must stay 16×16 (or ship @
 
 | File | Size | Role |
 | --- | --- | --- |
-| `splash2.png` | 450×487 | Startup splash screen (`splash` alias) |
-| `about.png` | 259×256 | About dialog image |
-| `splash2.jpg` | 96×96 | Small/legacy splash variant |
+| `hbn_revolution.png` | 762×744 | **Master coin render** (transparent) — source for the splash, About image, and README logo. |
+| `splash2.png` (legacy) | 450×487 | Old startup splash, superseded by the coin render. |
+| `about.png` (legacy) | 259×256 | Old About dialog image, superseded. |
+| `splash2.jpg` | 96×96 | Small/legacy splash variant. |
+
+The shipping splash (`src/qt/res/images/splash2.png`, 512×500), About image
+(`src/qt/res/images/about.png`, 256×250) and the README logo
+(`brand/hbn-coin.png`, 256×250) are all scaled from `hbn_revolution.png`.
 
 ## Vector sources (`vector-sources/`)
 

@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="src/qt/res/icons/HoboNickels-128.png" alt="HoboNickels" width="112" height="112">
+<img src="media-kit/brand/hbn-coin.png" alt="HoboNickels" width="140">
 
 # HoboNickels (HBN)
 
