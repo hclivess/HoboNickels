@@ -61,6 +61,8 @@ if(SECP256K1_INCLUDE_DIR AND SECP256K1_LIBRARY)
 else()
     message(STATUS "libsecp256k1: building from source (FetchContent)")
     include(FetchContent)
+    # Build it static so it links into the binaries (no extra DLL to ship).
+    set(BUILD_SHARED_LIBS OFF)
     set(SECP256K1_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(SECP256K1_BUILD_EXHAUSTIVE_TESTS OFF CACHE BOOL "" FORCE)
     set(SECP256K1_BUILD_BENCHMARK OFF CACHE BOOL "" FORCE)
