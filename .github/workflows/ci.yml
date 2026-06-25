@@ -132,11 +132,11 @@ jobs:
 
       - name: Verify bundle is self-contained (mingw64 off PATH)
         run: |
-          # Run from the bundle with mingw64 removed from PATH: only the DLLs
-          # shipped alongside the .exe (and Windows system DLLs) can resolve.
-          # If anything is missing the process exits 0xC0000135 (DLL not found).
+          # Drop only the mingw64 dirs from PATH (keep /usr/bin for head/grep);
+          # then the bundled DLLs in the .exe's dir are the only place its
+          # mingw deps can resolve. A missing one aborts at load (0xC0000135).
+          export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '/mingw64' | paste -sd: -)"
           cd dist/HoboNickelsd
-          export PATH="/c/Windows/System32:/c/Windows"
           out="$(./HoboNickelsd.exe --help 2>&1 || true)"
           echo "$out" | head -n 5
           echo "$out" | grep -q "HoboNickels version"
@@ -191,22 +191,29 @@ jobs:
           test -f build/HoboNickels-qt.exe
           file build/HoboNickels-qt.exe
 
-      - name: Bundle Qt + runtime DLLs (windeployqt)
+      - name: Bundle Qt + runtime DLLs
         run: |
           mkdir -p dist/HoboNickels-qt
           cp build/HoboNickels-qt.exe dist/HoboNickels-qt/
-          # windeployqt brings in the Qt DLLs and the platforms/qwindows.dll
-          # plugin (required for the app to start on Windows). MSYS2 names it
-          # windeployqt-qt5.
-          WINDEPLOYQT="$(command -v windeployqt-qt5 || command -v windeployqt)"
-          echo "using: $WINDEPLOYQT"
-          "$WINDEPLOYQT" --release --no-translations --no-compiler-runtime \
-            dist/HoboNickels-qt/HoboNickels-qt.exe
-          # windeployqt does not cover the non-Qt deps (libgcc, libstdc++,
-          # libwinpthread, openssl, boost, db, leveldb, miniupnpc) — add them.
+          # ldd copies every link-time DLL: the Qt5 libs AND the runtime
+          # (libgcc, libstdc++, libwinpthread, openssl, boost, db, leveldb, ...).
           ldd build/HoboNickels-qt.exe | awk '/\/mingw64\/bin\// {print $3}' | sort -u \
             | while read -r dll; do cp -n "$dll" dist/HoboNickels-qt/; done
-          ls -la dist/HoboNickels-qt/
+          # The Qt platform plugin is loaded at runtime (ldd can't see it), so
+          # copy it explicitly along with its own DLL deps. Same for styles and
+          # image formats (icons / native look).
+          QTPLUGINS="$(qmake-qt5 -query QT_INSTALL_PLUGINS 2>/dev/null || qmake -query QT_INSTALL_PLUGINS 2>/dev/null || echo /mingw64/share/qt5/plugins)"
+          echo "Qt plugins: $QTPLUGINS"
+          for sub in platforms styles imageformats; do
+            if [ -d "$QTPLUGINS/$sub" ]; then
+              mkdir -p "dist/HoboNickels-qt/$sub"
+              cp "$QTPLUGINS/$sub"/*.dll "dist/HoboNickels-qt/$sub/" 2>/dev/null || true
+              for p in "$QTPLUGINS/$sub"/*.dll; do
+                ldd "$p" 2>/dev/null | awk '/\/mingw64\/bin\// {print $3}'
+              done | sort -u | while read -r dll; do cp -n "$dll" dist/HoboNickels-qt/; done
+            fi
+          done
+          ls -la dist/HoboNickels-qt/ dist/HoboNickels-qt/platforms/
 
       - name: Verify bundle is self-contained (mingw64 off PATH)
         run: |
@@ -218,16 +225,25 @@ jobs:
             test -f "$d" || { echo "MISSING $d"; exit 1; }
           done
           ls libcrypto-*.dll
-          # Launch with mingw64 off PATH; a missing/unresolved DLL aborts the
-          # process at load with 0xC0000135 / 0xC0000139 before the GUI starts.
-          export PATH="/c/Windows/System32:/c/Windows"
+          # Drop mingw64 from PATH (keep /usr/bin). A missing link-time DLL
+          # aborts at load (0xC0000135); a missing/broken platform plugin makes
+          # Qt print "platform plugin" and abort. Either way -> fail.
+          export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '/mingw64' | paste -sd: -)"
+          # Use the offscreen platform so the check doesn't need a desktop
+          # session; it still loads the full Qt5 DLL chain from the bundle.
+          # qwindows.dll itself is validated by the file-presence check above
+          # (its deps are the same Qt5 libs).
+          export QT_QPA_PLATFORM=offscreen
           set +e
-          timeout 25 ./HoboNickels-qt.exe -? >/dev/null 2>&1
+          out="$(timeout 30 ./HoboNickels-qt.exe -? 2>&1)"
           code=$?
           set -e
-          echo "exit code: $code"
+          echo "exit code: $code"; echo "$out" | head -n 10
           if [ "$code" = "3221225781" ] || [ "$code" = "3221225595" ]; then
-            echo "DLL load failure (missing dependency)"; exit 1
+            echo "FAIL: DLL load failure"; exit 1
+          fi
+          if echo "$out" | grep -qiE "platform plugin|could not be initialized|failed to start"; then
+            echo "FAIL: Qt platform plugin error"; exit 1
           fi
 
       - name: Upload Windows Qt GUI (with DLLs)
