@@ -162,6 +162,15 @@ void SyncWithWallets(const CTransaction& tx, const CBlock* pblock, bool fUpdate,
 {
     if (!fConnect)
     {
+        // A block is being disconnected (reorg): a cached source block's stake
+        // modifier could in principle change, so drop the persistent staking
+        // metadata cache and let it rebuild from disk on the next staking pass.
+        {
+            LOCK(cs_setpwalletRegistered);
+            for (CWallet* pwallet : setpwalletRegistered)
+                pwallet->ClearStakeMetaCache();
+        }
+
         // ppcoin: wallets need to refund inputs when disconnecting coinstake
         if (tx.IsCoinStake())
         {
