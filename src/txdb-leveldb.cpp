@@ -3,6 +3,7 @@
 // Distributed under the MIT/X11 software license, see the accompanying
 // file license.txt or http://www.opensource.org/licenses/mit-license.php.
 
+#include <algorithm>
 #include <map>
 
 #include <boost/version.hpp>
@@ -27,8 +28,15 @@ leveldb::DB *txdb; // global pointer for LevelDB object instance
 
 static leveldb::Options GetOptions() {
     leveldb::Options options;
-    int nCacheSizeMB = GetArg("-dbcache", 25);
-    options.block_cache = leveldb::NewLRUCache(nCacheSizeMB * 1048576);
+    // -dbcache is the LevelDB read (block) cache, in MB. The old default of
+    // 25 MB is tiny on modern machines; a larger cache cuts disk reads during
+    // the initial block download.
+    int nCacheSizeMB = GetArg("-dbcache", 64);
+    size_t nCacheBytes = (size_t)nCacheSizeMB * 1048576;
+    options.block_cache = leveldb::NewLRUCache(nCacheBytes);
+    // A bigger write buffer means fewer memtable flushes / compactions while
+    // syncing (capped so we don't balloon memory on huge -dbcache values).
+    options.write_buffer_size = std::min<size_t>(nCacheBytes / 4, (size_t)64 * 1048576);
     options.filter_policy = leveldb::NewBloomFilterPolicy(10);
     return options;
 }
@@ -80,7 +88,7 @@ CTxDB::CTxDB(const char* pszMode)
 
     options = GetOptions();
     options.create_if_missing = fCreate;
-    options.filter_policy = leveldb::NewBloomFilterPolicy(10);
+    // (filter_policy is already set by GetOptions(); re-allocating here leaked it)
 
     init_blockindex(options); // Init directory
     pdb = txdb;
