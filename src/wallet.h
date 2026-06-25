@@ -121,6 +121,9 @@ public:
     bool fWalletUnlockMintOnly;
     bool fStakeForCharity;
     bool fCoinsDataActual;
+    // Balance cached for the staking loop; refreshed under the same
+    // fCoinsDataActual signal that gates the staking-coin cache.
+    int64_t nStakeCacheBalance;
     int nStakeForCharityPercent;
     int64_t nStakeForCharityMin;
     int64_t nStakeForCharityMax;
@@ -166,6 +169,7 @@ public:
         fWalletUnlockMintOnly = false;
         fStakeForCharity = false;
         fCoinsDataActual = false;
+        nStakeCacheBalance = 0;
         nStakeForCharityPercent = 0;
         nStakeForCharityMin = MIN_TXOUT_AMOUNT;
         nStakeForCharityMax = MAX_MONEY;

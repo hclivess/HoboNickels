@@ -74,13 +74,23 @@ static int64_t GetStakeModifierSelectionIntervalSection(int nSection)
     return (GetModiferInterval() * 63 / (63 + ((63 - nSection) * (MODIFIER_INTERVAL_RATIO - 1))));
 }
 
-// Get stake modifier selection interval (in seconds)
+// Get stake modifier selection interval (in seconds).
+// The result depends only on GetModiferInterval() (a per-network constant, fixed
+// at startup) and the compile-time MODIFIER_INTERVAL_RATIO, so the 64-section sum
+// is the same every call; cache it. This is on the per-coin staking lookup path
+// (GetKernelStakeModifier). The cached value is byte-identical to the computed
+// one, so consensus behaviour is unchanged.
 static int64_t GetStakeModifierSelectionInterval()
 {
-    int64_t nSelectionInterval = 0;
-    for (int nSection=0; nSection<64; nSection++)
-        nSelectionInterval += GetStakeModifierSelectionIntervalSection(nSection);
-    return nSelectionInterval;
+    static int64_t nSelectionIntervalCached = -1;
+    if (nSelectionIntervalCached < 0)
+    {
+        int64_t nSelectionInterval = 0;
+        for (int nSection=0; nSection<64; nSection++)
+            nSelectionInterval += GetStakeModifierSelectionIntervalSection(nSection);
+        nSelectionIntervalCached = nSelectionInterval;
+    }
+    return nSelectionIntervalCached;
 }
 
 // select a block from the candidate blocks in vSortedByTimestamp, excluding

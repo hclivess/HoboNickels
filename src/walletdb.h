@@ -190,8 +190,12 @@ public:
     {
         nWalletDBUpdated++;
 
-        return Erase(std::make_pair(std::string("s4c"), strStakeForCharityAddress));
-        return Erase(std::make_pair(std::string("s4c2"), strStakeForCharityAddress));
+        // Erase BOTH records. The second Erase was previously unreachable (it
+        // followed a return), leaving the "s4c2" min/max record orphaned and
+        // silently reloaded on restart after the user cleared S4C.
+        bool fErased1 = Erase(std::make_pair(std::string("s4c"), strStakeForCharityAddress));
+        bool fErased2 = Erase(std::make_pair(std::string("s4c2"), strStakeForCharityAddress));
+        return fErased1 && fErased2;
     }
 
 

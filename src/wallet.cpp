@@ -2019,8 +2019,20 @@ bool CWallet::CreateCoinStake(const CKeyStore& keystore, unsigned int nBits, int
     scriptEmpty.clear();
     txNew.vout.push_back(CTxOut(0, scriptEmpty));
 
-    // Choose coins to use
-    int64_t nBalance = GetBalance();
+    // Choose coins to use. GetBalance() walks the whole wallet and is called on
+    // every staking attempt (~every -minersleep ms). It only changes when a
+    // block arrives or the wallet sends — both of which clear fCoinsDataActual,
+    // the same signal that gates the staking-coin cache below — so cache it
+    // under that flag instead of recomputing each attempt. (When fCoinsDataActual
+    // is false the value is refreshed before the coin set is rebuilt, so the
+    // balance feeding SelectCoinsForStaking is always current.)
+    int64_t nBalance;
+    {
+        LOCK(cs_wallet);
+        if (!fCoinsDataActual)
+            nStakeCacheBalance = GetBalance();
+        nBalance = nStakeCacheBalance;
+    }
 
     if (nBalance <= nReserveBalance)
         return false;
