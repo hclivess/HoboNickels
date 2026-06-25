@@ -91,6 +91,36 @@ network:
 > normally and, for full assurance, diff produced block / coinstake / kernel hashes
 > against the previous binary on a real chain.
 
+## Stake-output management: split / combine ("autocombine")
+
+When the wallet builds a coinstake it can **split** the output (so you keep several
+staking outputs that mint more often) and **combine** small same-address outputs
+back together (so dust doesn't pile up). Both are decided in `CreateCoinStake` and
+are **pure wallet policy** — other nodes only check that the coinstake's total output
+≤ inputs + earned reward, never how many outputs you make or which small coins you
+fold in. So this is all tunable **without a hard fork**.
+
+The original behaviour was lopsided and is fixed here:
+
+- **Combine was effectively dead.** The combine loop skipped any candidate whose
+  `GetWeight() < nStakeMaxAge` — i.e. it only folded in coins that had reached
+  **full** weight (`max age + min age` ≈ 31 days here). An actively-staking wallet's
+  coins are consumed long before sitting untouched that long, so autocombine almost
+  never fired. The gate is now "**ripe** (past the minimum stake age)" — a combined
+  coin's accrued coin-age is harvested into the stake's reward, and only the small
+  re-aging "dead zone" is given up. Combine still only folds same-address outputs
+  ≤ `combinethreshold`, up to 100 inputs / the reserve limit.
+- **Split fragmented too aggressively.** The default `splitthreshold` was the PoW
+  reward (5 HBN), so almost every stake split into two, and combine never glued the
+  pieces back — a fragmentation spiral. The defaults now match the documented help
+  (`splitthreshold` 25 HBN, `combinethreshold` 50 HBN), so routine stakes stay whole
+  and dust actually consolidates. Both remain runtime-adjustable via the
+  `splitthreshold` / `combinethreshold` RPCs (or `-splitthreshold`/`-combinethreshold`).
+
+This changes the *staker's own* output layout only; the kernel, reward formula and
+validation are untouched. As with the metadata cache it is CI-verified and
+reasoned-correct but should be confirmed on a live staker before release.
+
 ## Deferring the per-attempt block build (busy-chain win; lower priority here)
 
 A full block (mempool walk + per-input disk reads + merkle) is built on every
