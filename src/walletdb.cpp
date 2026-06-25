@@ -674,7 +674,10 @@ DBErrors CWalletDB::ZapWalletTx(CWallet* pwallet)
             return DB_CORRUPT;
     }
 
-    return DB_LOAD_OK;
+    // Erasing only frees BDB pages onto the in-file free list; signal a rewrite so
+    // CWallet::ZapWalletTx actually compacts the file (otherwise -zapwallettxes left
+    // a logically-empty wallet at the same huge size on disk).
+    return DB_NEED_REWRITE;
 }
 
 void ThreadFlushWalletDB(void* parg)

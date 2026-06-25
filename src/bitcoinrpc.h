@@ -210,6 +210,7 @@ extern json_spirit::Value splitthreshold(CWallet* pWallet, const json_spirit::Ar
 extern json_spirit::Value combinethreshold(CWallet* pWallet, const json_spirit::Array& params, bool fHelp);
 extern json_spirit::Value checkwallet(CWallet* pWallet, const json_spirit::Array& params, bool fHelp);
 extern json_spirit::Value repairwallet(CWallet* pWallet, const json_spirit::Array& params, bool fHelp);
+extern json_spirit::Value compactwallet(CWallet* pWallet, const json_spirit::Array& params, bool fHelp);
 extern json_spirit::Value resendtx(CWallet* pWallet, const json_spirit::Array& params, bool fHelp);
 extern json_spirit::Value makekeypair(CWallet* pWallet, const json_spirit::Array& params, bool fHelp);
 extern json_spirit::Value mergecoins(CWallet* pWallet, const json_spirit::Array& params, bool fHelp);

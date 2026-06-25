@@ -426,15 +426,19 @@ void CWallet::WalletUpdateSpent(const CTransaction &tx, bool fBlock)
        map<uint256, CWalletTx>::iterator mi = mapWallet.find(hash);
        CWalletTx& wtx = (*mi).second;
 
+       bool fUpdated = false;
        for (const CTxOut& txout : tx.vout)
        {
            if (IsMine(txout))
            {
               wtx.MarkUnspent(&txout - &tx.vout[0]);
-              wtx.WriteToDisk();
+              fUpdated = true;
            }
        }
-
+       // Write the whole record once after marking all outputs, not once per
+       // output -- the same final state with fewer full-record puts (less BDB slack).
+       if (fUpdated)
+           wtx.WriteToDisk();
     }
 }
 
@@ -2417,6 +2421,17 @@ DBErrors CWallet::LoadWallet(bool& fFirstRunRet)
     if (nLoadWalletRet != DB_LOAD_OK)
         return nLoadWalletRet;
     fFirstRunRet = !vchDefaultKey.IsValid();
+
+    // Optional startup compaction. A long-running staking wallet.dat only grows on
+    // disk -- BDB never returns freed pages to the OS -- so with -compactwallet we
+    // rewrite it to its live records now, while the file is not yet in active use
+    // (the flush thread starts below). Off by default so huge wallets don't pay a
+    // slow startup unless asked; the `compactwallet` RPC does the same on demand.
+    if (GetBoolArg("-compactwallet", false))
+    {
+        LogPrintf("Compacting wallet %s on startup (-compactwallet)\n", strWalletFile.c_str());
+        CDB::Rewrite(strWalletFile);
+    }
 
     NewThread(ThreadFlushWalletDB, &strWalletFile);
     return DB_LOAD_OK;

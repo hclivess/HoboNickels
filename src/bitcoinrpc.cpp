@@ -308,6 +308,7 @@ static const CRPCCommand vRPCCommands[] =
     { "combinethreshold",       &combinethreshold,       false,  true,     false },
     { "checkwallet",            &checkwallet,            false,  true,     true  },
     { "repairwallet",           &repairwallet,           false,  true,     true  },
+    { "compactwallet",          &compactwallet,          false,  true,     true  },
     { "resendtx",               &resendtx,               false,  true,     true  },
     { "makekeypair",            &makekeypair,            false,  true,     false },
     { "stakeforcharity",        &stakeforcharity,        false,  false,    true  },

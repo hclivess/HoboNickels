@@ -2021,6 +2021,41 @@ Value repairwallet(CWallet* pWallet, const Array& params, bool fHelp)
     return result;
 }
 
+Value compactwallet(CWallet* pWallet, const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() > 0)
+        throw runtime_error(
+            "compactwallet\n"
+            "Compact this wallet's Berkeley DB file (wallet.dat) to reclaim free space.\n"
+            "A long-running staking wallet's file only grows on disk: BDB never returns\n"
+            "freed pages to the OS, so deleted/rewritten records leave slack that piles\n"
+            "up over time. This rewrites the file to just its live records. The rewrite\n"
+            "is crash-safe (the original is replaced atomically), and is the supported\n"
+            "alternative to restoring an older, smaller wallet backup.\n"
+            "Returns the file size before and after.\n");
+
+    boost::filesystem::path pathWallet = GetDataDir() / pWallet->strWalletFile;
+    uintmax_t nBefore = 0, nAfter = 0;
+    try { if (boost::filesystem::exists(pathWallet)) nBefore = boost::filesystem::file_size(pathWallet); }
+    catch (const boost::filesystem::filesystem_error&) {}
+
+    // CDB::Rewrite copies every live record into a fresh B-tree and atomically
+    // replaces the file; it waits internally until the file is no longer in use
+    // (same machinery used by the wallet-encrypt and legacy-upgrade paths).
+    if (!CDB::Rewrite(pWallet->strWalletFile))
+        throw JSONRPCError(RPC_WALLET_ERROR, "Wallet compaction failed; the wallet file is unchanged.");
+
+    try { if (boost::filesystem::exists(pathWallet)) nAfter = boost::filesystem::file_size(pathWallet); }
+    catch (const boost::filesystem::filesystem_error&) {}
+
+    Object result;
+    result.push_back(Pair("wallet", pWallet->strWalletFile));
+    result.push_back(Pair("size_before", (uint64_t)nBefore));
+    result.push_back(Pair("size_after", (uint64_t)nAfter));
+    result.push_back(Pair("reclaimed", (int64_t)nBefore - (int64_t)nAfter));
+    return result;
+}
+
 // HoboNickels: resend unconfirmed wallet transactions
 Value resendtx(CWallet* pWallet, const Array& params, bool fHelp)
 {

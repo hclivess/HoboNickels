@@ -38,6 +38,40 @@ ones were taken. Each preserves identical behaviour:
   incompressible 32-byte hashes, so Snappy only burned CPU per SST read/write.
 - **`-checkblocks` help text** corrected (250, was wrongly documented as 2500).
 
+## Wallet.dat bloat — why it grows, and the fix
+
+A long-running staking `wallet.dat` grows without bound and eventually becomes slow
+to load — the historical workaround was to restore an older, smaller backup. Two
+compounding causes:
+
+1. **It's never compacted.** `wallet.dat` is a Berkeley DB B-tree; deleted/rewritten
+   records free pages onto an in-file free list that BDB **never returns to the OS**.
+   The only code that actually shrinks the file (`CDB::Rewrite`) ran only on
+   wallet-encrypt and legacy-format upgrade — never on a steady-state staker. (The
+   BDB *log* files are already auto-managed via `DB_LOG_AUTO_REMOVE` +
+   `log_archive`; that is *not* the bloat, and `txn_checkpoint`/`lsn_reset` only flush
+   the log *into* the .dat — they can't shrink it.)
+2. **Every coinstake is kept forever** (one `tx` record per stake, never pruned),
+   plus write amplification (the same record rewritten per-output / per-input).
+
+The autocombine/split fix only slowed the *rate* (less fragmentation); it doesn't
+compact or prune. Applied fixes (wallet-only, non-consensus):
+
+- **`compactwallet` RPC** (rpcwallet.cpp) — rewrites `wallet.dat` to its live record
+  set on demand via the existing crash-safe `CDB::Rewrite`; reports size before/after.
+  The supported replacement for "restore an older backup."
+- **`-compactwallet`** — do that compaction automatically at startup (opt-in; the file
+  isn't in active use yet, so the rewrite's guards hold).
+- **`-zapwallettxes` now shrinks** — `CWalletDB::ZapWalletTx` returned `DB_LOAD_OK`,
+  so the existing rewrite branch was dead; it now returns `DB_NEED_REWRITE`.
+- **Less write amplification** — `WalletUpdateSpent` wrote the whole record once *per
+  output*; now once after marking all outputs (same final state, fewer BDB puts).
+
+Deliberately **not** done (risky): depth-and-spent-based pruning of old coinstake
+records attacks the logical dataset directly but must never drop a record balance,
+history, or coin-age display still needs — a conservative, flag-gated last resort if
+compaction proves insufficient.
+
 ## Deferred — worthwhile but need care / live validation
 
 Real wins the audit surfaced that were **not** taken yet, because they touch

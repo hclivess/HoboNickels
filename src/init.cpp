@@ -319,6 +319,7 @@ std::string HelpMessage()
         strUsage += "  -keypool=<n>           " + _("Set key pool size to <n> (default: 100)") + "\n";
         strUsage += "  -rescan                " + _("Rescan the block chain for missing wallet transactions") + "\n";
         strUsage += "  -zapwallettxes         " + _("Clear list of wallet transactions (diagnostic tool; implies -rescan)") + "\n";
+        strUsage += "  -compactwallet         " + _("Compact (rewrite) wallet.dat on startup to reclaim disk space; also available as the 'compactwallet' RPC") + "\n";
         strUsage += "  -splitthreshold=<n>    " + _("Set stake split threshold within range (default 25),(max 2500))") + "\n";
         strUsage += "  -combinethreshold=<n>  " + _("Set stake combine threshold within range (default 50),(max 5000))") + "\n";
         strUsage += "  -salvagewallet         " + _("Attempt to recover private keys from a corrupt wallet.dat") + "\n";

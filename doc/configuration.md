@@ -53,6 +53,23 @@ addnode=coins.dognose.net
 | `combinethreshold` (RPC) | Combine staking outputs below this size. |
 | Stake-For-Charity (GUI / RPC) | Donate a configurable percentage of each stake to an address, between min/max amounts. |
 
+## Wallet maintenance (keeping wallet.dat small)
+
+A long-running staking `wallet.dat` only ever **grows** on disk: it's a Berkeley DB
+file, and BDB never returns freed pages to the OS, so every stake (one permanent
+coinstake record) plus rewritten records leave slack that piles up. Historically the
+only workaround was to restore an older, smaller backup. Now:
+
+| Option / RPC | Description |
+| --- | --- |
+| `compactwallet` (RPC) | Rewrite `wallet.dat` to just its live records, reclaiming all free-list slack. Crash-safe (the original is replaced atomically). Reports size before/after. The supported alternative to restoring an old backup. |
+| `-compactwallet` | Do that compaction automatically **on startup** (off by default, so huge wallets don't pay a slow start unless asked). |
+| `-zapwallettxes` | Clears the wallet's transaction list (diagnostic; implies `-rescan`) — now also compacts the file afterwards, so it actually shrinks on disk. |
+
+The split/combine defaults (above) reduce the *rate* of growth (less output
+fragmentation), but compaction is what reclaims the space. See
+[performance.md](performance.md) for the full analysis.
+
 ## GUI (Qt wallet)
 
 | Option | Default | Description |
