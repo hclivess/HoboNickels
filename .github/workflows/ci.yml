@@ -119,11 +119,22 @@ jobs:
           echo "$out" | head -n 5
           echo "$out" | grep -q "HoboNickels version"
 
-      - name: Upload Windows daemon
+      - name: Bundle runtime DLLs
+        run: |
+          # Make the binary self-contained: copy every mingw64 DLL it depends on
+          # (libgcc_s_seh-1, libwinpthread-1, libstdc++-6, libcrypto-3-x64,
+          # boost, db, leveldb, miniupnpc, ...) next to the .exe.
+          mkdir -p dist/HoboNickelsd
+          cp build/HoboNickelsd.exe dist/HoboNickelsd/
+          ldd build/HoboNickelsd.exe | awk '/\/mingw64\/bin\// {print $3}' | sort -u \
+            | while read -r dll; do cp -v "$dll" dist/HoboNickelsd/; done
+          ls -la dist/HoboNickelsd/
+
+      - name: Upload Windows daemon (with DLLs)
         uses: actions/upload-artifact@v4
         with:
           name: HoboNickelsd-windows-x86_64
-          path: build/HoboNickelsd.exe
+          path: dist/HoboNickelsd
 
   build-windows-gui:
     name: Windows Qt5 GUI (MSYS2 mingw64)
@@ -169,11 +180,25 @@ jobs:
           test -f build/HoboNickels-qt.exe
           file build/HoboNickels-qt.exe
 
-      - name: Upload Windows Qt GUI
+      - name: Bundle Qt + runtime DLLs (windeployqt)
+        run: |
+          mkdir -p dist/HoboNickels-qt
+          cp build/HoboNickels-qt.exe dist/HoboNickels-qt/
+          # windeployqt brings in the Qt DLLs and the platforms/qwindows.dll
+          # plugin (required for the app to start on Windows).
+          windeployqt --release --no-translations --no-compiler-runtime \
+            dist/HoboNickels-qt/HoboNickels-qt.exe
+          # windeployqt does not cover the non-Qt deps (libgcc, libstdc++,
+          # libwinpthread, openssl, boost, db, leveldb, miniupnpc) — add them.
+          ldd build/HoboNickels-qt.exe | awk '/\/mingw64\/bin\// {print $3}' | sort -u \
+            | while read -r dll; do cp -n "$dll" dist/HoboNickels-qt/; done
+          ls -la dist/HoboNickels-qt/
+
+      - name: Upload Windows Qt GUI (with DLLs)
         uses: actions/upload-artifact@v4
         with:
           name: HoboNickels-qt-windows-x86_64
-          path: build/HoboNickels-qt.exe
+          path: dist/HoboNickels-qt
 
   docker:
     name: Docker image
