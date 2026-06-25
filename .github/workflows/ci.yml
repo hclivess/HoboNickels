@@ -196,8 +196,11 @@ jobs:
           mkdir -p dist/HoboNickels-qt
           cp build/HoboNickels-qt.exe dist/HoboNickels-qt/
           # windeployqt brings in the Qt DLLs and the platforms/qwindows.dll
-          # plugin (required for the app to start on Windows).
-          windeployqt --release --no-translations --no-compiler-runtime \
+          # plugin (required for the app to start on Windows). MSYS2 names it
+          # windeployqt-qt5.
+          WINDEPLOYQT="$(command -v windeployqt-qt5 || command -v windeployqt)"
+          echo "using: $WINDEPLOYQT"
+          "$WINDEPLOYQT" --release --no-translations --no-compiler-runtime \
             dist/HoboNickels-qt/HoboNickels-qt.exe
           # windeployqt does not cover the non-Qt deps (libgcc, libstdc++,
           # libwinpthread, openssl, boost, db, leveldb, miniupnpc) — add them.
