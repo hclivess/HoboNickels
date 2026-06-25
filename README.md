@@ -18,8 +18,11 @@ cmake --build build -j"$(nproc)"
 ./build/HoboNickelsd --help
 ```
 
-See [`doc/build-unix-modern.md`](doc/build-unix-modern.md) for full options
-(UPnP, Qt5 GUI, tests) and Docker usage.
+Full documentation is under [`doc/`](doc/) — start with
+[`doc/MODERNIZATION.md`](doc/MODERNIZATION.md) for an overview, or
+[`doc/build-unix-modern.md`](doc/build-unix-modern.md) for build options
+(UPnP, Qt5 GUI, tests, Docker) and [`doc/configuration.md`](doc/configuration.md)
+for runtime options (sync speed, staking, networking).
 
 ---
 

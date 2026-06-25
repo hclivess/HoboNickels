@@ -36,17 +36,39 @@ network:
 - **`EraseStakeForCharity` fix** (walletdb.h): the `s4c2` record erase was
   unreachable (it followed a `return`), so disabling S4C left an orphaned record.
 
+## Deferring the per-attempt block build — the RIGHT way (must keep mempool txs)
+
+Today a full block (mempool walk + per-input disk reads + merkle) is built on
+every ~500 ms staking attempt and discarded when no kernel is found (~always).
+Deferring that build is the biggest potential win, but it is a hard requirement
+that **a staked block always includes every eligible mempool transaction** —
+omitting them is not acceptable (it would stop transactions confirming
+network-wide). So any deferral must produce exactly the block the current code
+would, just more cheaply.
+
+Two mempool-preserving ways to do it, both needing testnet validation:
+
+1. **Probe, then build.** Run the cheap kernel scan first (read-only, on the
+   already-cached `mapMeta`); only when it finds a kernel, build the full block
+   the normal way (`CreateNewBlock` + `SignPoSBlock`). The produced block is
+   byte-identical to today and the coinstake still claims the block fees. The
+   care item is matching the probe's search window to `SignPoSBlock`'s (its
+   `nLastCoinStakeSearchTime` would need to be shared) so a stake is never
+   missed.
+2. **Cache the mempool selection.** Keep building the full block every attempt,
+   but cache the expensive selected-transaction set and reuse it while the
+   mempool (`nTransactionsUpdated`) and `pindexBest` are unchanged, rebuilding
+   only the cheap coinbase/header. Identical blocks, never skips mempool, no
+   risk of missed stakes.
+
+Option 2 is the safer first step. Either way, validate by diffing produced
+block/coinstake/kernel hashes against the current binary on testnet.
+
 ## Deferred (need testnet validation / maintainer sign-off)
 
 Each of these changes observable behaviour or touches consensus-adjacent code, so
 they should be validated by diffing produced block/coinstake/kernel hashes against
 the current binary on testnet before release:
-
-- **Defer/cache `CreateNewBlock`** until a kernel is actually found. Today a full
-  block (mempool walk + disk reads + merkle) is built on every ~500ms iteration
-  and discarded when no kernel is found (~always). Highest CPU/IO win; most
-  invasive. Safe variant: cache the candidate and rebuild only when `pindexBest`
-  changes — must keep the produced block bit-identical.
 - **Idle back-off sleep** in `StakeMiner` when `pindexBest` is unchanged (cap well
   under the 60s kernel search window so no timestamps are skipped).
 - **Factor the invariant kernel-hash prefix** out of the 60-iteration inner loop
