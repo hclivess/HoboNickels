@@ -2220,8 +2220,14 @@ bool CWallet::CreateCoinStake(const CKeyStore& keystore, unsigned int nBits, int
             // Do not add additional significant input
             if (pcoin.first->vout[pcoin.second].nValue > nCombineThreshold)
                 continue;
-            // Do not add input that is still too young
-            if (nTimeWeight < nStakeMaxAge)
+            // Only combine inputs that are themselves ripe (past the minimum stake
+            // age), so their accrued coin-age is harvested into this stake's reward
+            // rather than reset for nothing. The original gate required FULL weight
+            // (>= max stake age, ~31 days here), which almost never holds for an
+            // actively-staking wallet, so autocombine effectively never fired.
+            // (Non-consensus: how the staker consolidates its OWN coinstake outputs
+            // is wallet policy; other nodes only check total value out <= in + reward.)
+            if (nTimeWeight <= 0)
                 continue;
 
             txNew.vin.push_back(CTxIn(pcoin.first->GetHash(), pcoin.second));

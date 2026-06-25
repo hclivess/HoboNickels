@@ -79,8 +79,14 @@ int64_t nHPSTimerStart;
 // Settings
 int64_t nTransactionFee = MIN_TX_FEE;
 int64_t nMinimumInputValue = MIN_TX_FEE;
-int64_t nSplitThreshold = GetProofOfWorkReward();
-int64_t nCombineThreshold = GetProofOfWorkReward() * 2;
+// Stake-output management defaults (wallet policy, non-consensus; runtime-adjustable
+// via the splitthreshold / combinethreshold RPCs or -splitthreshold/-combinethreshold).
+// These match the documented help defaults and sit well above the PoW reward so that
+// routine stakes no longer fragment into dust (split) and so small same-address
+// outputs actually get consolidated (combine). The old defaults (5 / 10 HBN) split
+// almost every stake and combined almost nothing.
+int64_t nSplitThreshold = 25 * COIN;   // only split a stake output above 25 HBN
+int64_t nCombineThreshold = 50 * COIN; // fold same-address dust until 50 HBN accrued
 extern enum Checkpoints::CPMode CheckpointsMode;
 
 unsigned int GetTargetSpacing()
