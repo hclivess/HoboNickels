@@ -43,6 +43,14 @@ if(USE_QRCODE)
     list(APPEND GUI_SOURCES src/qt/qrcodedialog.cpp)
 endif()
 
+# Windows: embed the HoboNickels coin icon into the .exe so the executable
+# (Explorer, taskbar, alt-tab) carries the brand icon, not the default mingw one.
+# windres resolves the ICON path relative to the .rc file's own directory.
+if(WIN32)
+    enable_language(RC)
+    list(APPEND GUI_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/qt/res/HoboNickels.rc)
+endif()
+
 add_executable(HoboNickels-qt WIN32 ${GUI_SOURCES})
 if(NOT USE_SYSTEM_LEVELDB)
     add_dependencies(HoboNickels-qt leveldb_ext)

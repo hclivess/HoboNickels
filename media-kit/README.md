@@ -100,14 +100,24 @@ source** and would need to be re-created.
 effectively obsolete; a modern replacement would be an animated SVG/GIF or a Qt
 `QMovie`-friendly format.
 
-## Suggested modernization priorities
+## Modernization status — done
 
-1. **Logo / app icon** — redraw the coin from `bitcoin.svg`, export a clean square
-   ramp (16/32/48/64/128/256/512 + `.ico` + `.icns`), keeping silver+gold+black.
-2. **Unified UI icon set** — one coherent vector set (single stroke weight, grid),
-   replacing today's mixed 16–128px raster icons; ship SVG or @1x/@2x PNG.
-3. **Status glyphs** — crisp 16×16 (+32×32 @2x) for the connection bars, sync,
-   staking and confirmation clocks; they read tiny in the status bar.
-4. **Splash / about** — a higher-resolution splash (current 450×487) for HiDPI.
-5. Fix the **non-square** brand sizes (128/48/80) and the inconsistent icon
-   dimensions noted above.
+The whole UI graphics set has been modernized (shipping copies live under
+`src/qt/res/`; the copies here are kept in sync):
+
+- ✅ **Logo / app icon** — the `HoboNickels-*` ramp, `.ico` and `.icns` are now the
+  transparent coin render (`splash/hbn_revolution.png`), squared and clean; the
+  Windows `.exe` carries it via `src/qt/res/HoboNickels.rc`. Testnet variants are an
+  amber-tinted coin.
+- ✅ **Unified UI icon set** — the toolbar/action icons (overview, history, send,
+  receive, address-book, add/edit/remove, copy/paste, export/import, save, key,
+  qrcode, debug, inspect, repair, load/unload, quit, configure, tx in/out/mined)
+  were redrawn as one coherent flat **gold** set at 128×128, legible on light and
+  dark themes.
+- ✅ **Status glyphs** — connection bars, sync, staking, lock, the confirmation
+  clocks and tx-state marks redrawn crisp at high resolution.
+- ✅ **Splash / About** — the coin render at 512×500 / 256×250.
+
+Remaining nice-to-haves: replace the legacy MNG spinner with an animated SVG/GIF,
+and (optionally) produce true vector (SVG) sources for the new flat icon set so
+they're resolution-independent rather than 128×128 raster.
