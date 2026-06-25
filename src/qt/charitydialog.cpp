@@ -97,7 +97,7 @@ void StakeForCharityDialog::on_enableButton_clicked()
 {
     if(model->getEncryptionStatus() == WalletModel::Locked)
     {
-        ui->message->setStyleSheet("QLabel { color: black; }");
+        ui->message->setStyleSheet(""); // inherit palette text colour (theme-safe)
         ui->message->setText(tr("Please unlock wallet before starting stake for charity."));
         return;
     }
@@ -198,7 +198,7 @@ void StakeForCharityDialog::on_disableButton_clicked()
     ui->charityMaxEdit->clear();
     ui->charityMinEdit->clear();
     ui->charityPercentEdit->clear();
-    ui->message->setStyleSheet("QLabel { color: black; }");
+    ui->message->setStyleSheet(""); // inherit palette text colour (theme-safe)
     ui->message->setText(tr("Stake for Charity is now off"));
     return;
 }

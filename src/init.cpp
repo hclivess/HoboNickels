@@ -294,6 +294,8 @@ std::string HelpMessage()
         else
             strUsage += ".\n";
 
+        if (fHaveGUI)
+            strUsage += "  -uitheme=<theme>       " + _("GUI colour theme: light (default), dark, or native") + "\n";
 
         strUsage += "  -logtimestamps         " + _("Prepend debug output with timestamp (default: 1)") + "\n";
         strUsage += "  -shrinkdebugfile       " + _("Shrink debug.log file on client startup (default: 1 when no -debug)") + "\n";

@@ -10,6 +10,7 @@
 #include "optionsmodel.h"
 #include "guiutil.h"
 #include "guiconstants.h"
+#include "thememanager.h"
 #include "winshutdownmonitor.h"
 
 #include "init.h"
@@ -155,6 +156,10 @@ int main(int argc, char *argv[])
     #endif 
 
     Q_INIT_RESOURCE(bitcoin);
+
+    // High-DPI scaling must be enabled before the QApplication is constructed.
+    ThemeManager::applyHighDpiSettings();
+
     QApplication app(argc, argv);
 
     // Install global event filter that makes sure that long tooltips can be word-wrapped
@@ -186,6 +191,10 @@ int main(int argc, char *argv[])
         app.setApplicationName("HoboNickels-Qt-testnet");
     else
         app.setApplicationName("HoboNickels-Qt");
+
+    // Apply the modern look-and-feel (style + palette + stylesheet). Reads the
+    // -uitheme option (light/dark/native) from the command line or config file.
+    ThemeManager::applyTheme(app, ThemeManager::configuredTheme());
 
     // ... then GUI settings:
     OptionsModel optionsModel;
