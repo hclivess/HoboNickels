@@ -1,14 +1,58 @@
+<div align="center">
+
+<img src="src/qt/res/icons/HoboNickels-128.png" alt="HoboNickels" width="112" height="112">
+
 # HoboNickels (HBN)
 
-A proof-of-stake / proof-of-work hybrid cryptocurrency, originally a 2014-era
-Bitcoin / Peercoin / Novacoin fork.
+**A Scrypt proof-of-work / proof-of-stake hybrid cryptocurrency — a 2014-era
+Bitcoin / Peercoin / Novacoin fork, modernized to build and run on a current toolchain.**
 
-## Modernized build
+[![CI](https://github.com/hclivess/HoboNickels/actions/workflows/ci.yml/badge.svg)](https://github.com/hclivess/HoboNickels/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/hclivess/HoboNickels)](https://github.com/hclivess/HoboNickels/releases/latest)
+[![License](https://img.shields.io/badge/license-MIT%2FX11-blue.svg)](COPYING)
+![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20%7C%20Docker-lightgrey)
 
-This tree has been modernized to build and run on a current toolchain
-(**Ubuntu 24.04**, **GCC 13**, **OpenSSL 3**, **Boost 1.83**, **Berkeley DB 5.3**,
-**Qt 5**) via a new CMake build system. Consensus behaviour — signatures,
-addresses, hashing — is unchanged.
+[Download](#download) · [Build from source](#build-from-source) · [Specifications](#specifications) · [Documentation](#documentation)
+
+</div>
+
+---
+
+HoboNickels is a self-mintable PoS coin: hold coins in an unlocked wallet and it
+**stakes** them to earn rewards and secure the network. This repository is a
+modernization of the original 2014 client — the consensus rules (signatures,
+addresses, hashing, the kernel) are **byte-for-byte unchanged and fully
+network-compatible**, while everything around them was brought up to date:
+
+- 🛠️ **Modern toolchain** — Ubuntu 24.04 · GCC 13 · OpenSSL 3 · Boost 1.83 ·
+  Berkeley DB · Qt 5, built with **CMake** (the old autotools/`.pro` system is retired).
+- ⚡ **Faster sync, lower overhead** — libsecp256k1 signature verification (OpenSSL
+  fallback, no fork), dynamic checkpointing, and tuned LevelDB caching.
+- 🖥️ **Modern Qt5 wallet** — high-DPI aware, light/dark themes (`-uitheme`), and a
+  crisp redrawn icon set.
+- 🔌 **Modern RPC** — lightweight read-only endpoints (`getblockchaininfo`,
+  `getnetworkinfo`, `getwalletinfo`, `getblockheader`, `getmempoolinfo`, `uptime`).
+- ✅ **CI & Docker** — every change is built and tested on Linux + Windows + Docker.
+
+> See [`doc/MODERNIZATION.md`](doc/MODERNIZATION.md) for the full list of changes.
+
+## Download
+
+Pre-built, self-contained binaries for **Linux** and **Windows** are on the
+[**Releases page**](https://github.com/hclivess/HoboNickels/releases/latest):
+
+| Component | Linux | Windows |
+| --- | --- | --- |
+| **Daemon** (headless) | `HoboNickelsd-*-linux-x86_64` | `HoboNickelsd-*-windows-x86_64.zip` |
+| **Wallet GUI** (Qt5) | `HoboNickels-qt-*-linux-x86_64` | `HoboNickels-qt-*-windows-x86_64.zip` |
+
+The Windows `.zip`s bundle every runtime DLL (and the Qt platform plugin) and are
+verified in CI to launch with the build toolchain off the `PATH` — just unzip and
+run the `.exe`.
+
+## Build from source
+
+**Linux (daemon):**
 
 ```sh
 sudo apt-get install -y build-essential cmake pkg-config \
@@ -18,34 +62,66 @@ cmake --build build -j"$(nproc)"
 ./build/HoboNickelsd --help
 ```
 
-Full documentation is under [`doc/`](doc/) — start with
-[`doc/MODERNIZATION.md`](doc/MODERNIZATION.md) for an overview, or
-[`doc/build-unix-modern.md`](doc/build-unix-modern.md) for build options
-(UPnP, Qt5 GUI, tests, Docker) and [`doc/configuration.md`](doc/configuration.md)
-for runtime options (sync speed, staking, networking).
+Add the **Qt5 GUI** with `-DWITH_QT_GUI=ON` (needs `qtbase5-dev qttools5-dev`). For
+the GUI, Windows/MSYS2, Docker, unit tests, and all other options see
+[`doc/build-unix-modern.md`](doc/build-unix-modern.md).
 
----
+## Run
 
-## HoboNickels Crypto Tokens
+```sh
+# create the data dir + config (the daemon prints a suggested rpcpassword on first run)
+./build/HoboNickelsd          # start the node
+./build/HoboNickelsd getinfo  # query it
+```
 
-* Staking:
-  * 100% Max Yearly Stake Reward
-  * 20% Min Stake Reward
-  * 250 Max Reward Cap
-  * 1 day min weight, 30 days max weight.
-  
-* Based on NVC/BitGems/Bottlecaps
-* Proof of Work/Proof of Stake Hybrid. 
-* Scrypt
-* Linear Difficulty Retarget
-* 25 Confirms
-* 5 Tokens Per Block
-* Maximum of 120000000 Tokens
-* Default P2P Port: 7372
-* Default RPC Port: 7373
-* Dynamically Loadable Wallets 
-* Updated Coin Control
-* Easy Accessible Peer, Stake, and Block information
-* Stake For Charity
-* Built in Block Browser and Network Graph
-* Configurable splitthreshold and combinethreshold
+Known-good peers and DNS seeds are built in. Tunable options (sync, staking,
+networking, GUI theme) are documented in
+[`doc/configuration.md`](doc/configuration.md).
+
+## Specifications
+
+| | |
+| --- | --- |
+| **Algorithm** | Scrypt |
+| **Type** | Hybrid Proof-of-Work + Proof-of-Stake |
+| **PoW block reward** | 5 HBN |
+| **Max supply** | 120,000,000 HBN |
+| **Confirmations** | 25 |
+| **Difficulty retarget** | Linear |
+| **Stake reward** | 20% min → 100% max annual, capped at 250 HBN |
+| **Stake weight** | 1 day min, 30 days max |
+| **Default P2P port** | 7372 |
+| **Default RPC port** | 7373 |
+
+*Based on NovaCoin / BitGems / Bottlecaps.*
+
+## Wallet features
+
+- **Proof-of-stake minting** with **Stake-For-Charity** — donate a configurable
+  percentage of each stake to an address.
+- **Multi-wallet** — dynamically load and unload wallets at runtime.
+- **Coin control** with configurable `splitthreshold` / `combinethreshold` for
+  managing stake-output sizes.
+- **Built-in block browser** and **network graph**.
+- At-a-glance **peer, stake, and block** information.
+- Modern **Qt5 GUI**: high-DPI, light/dark/native themes (`-uitheme`).
+- **RPC console** in the GUI exposing the full command set.
+
+## Documentation
+
+Everything lives under [`doc/`](doc/):
+
+| Document | What it covers |
+| --- | --- |
+| [MODERNIZATION.md](doc/MODERNIZATION.md) | What changed and why — start here |
+| [build-unix-modern.md](doc/build-unix-modern.md) | Building with CMake (daemon, GUI, Windows, Docker, tests) |
+| [configuration.md](doc/configuration.md) | Runtime options (sync, staking, networking, GUI, RPC) |
+| [gui.md](doc/gui.md) | The Qt5 wallet — theming, high-DPI, RPC console |
+| [staking-performance.md](doc/staking-performance.md) | How PoS minting works and the performance work |
+
+Brand and UI graphics for designers are in [`media-kit/`](media-kit/).
+
+## License
+
+Released under the **MIT/X11** license — see [COPYING](COPYING). Built on the work
+of the Bitcoin, Peercoin (PPCoin), and Novacoin developers.
