@@ -15,7 +15,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential cmake pkg-config \
         libboost-all-dev libssl-dev libdb++-dev \
-        libminiupnpc-dev zlib1g-dev \
+        libminiupnpc-dev zlib1g-dev libsecp256k1-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -36,7 +36,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libboost-system1.83.0 libboost-filesystem1.83.0 \
         libboost-program-options1.83.0 libboost-thread1.83.0 \
         libboost-chrono1.83.0t64 \
-        libdb5.3++t64 libssl3t64 libminiupnpc17 zlib1g \
+        libdb5.3++t64 libssl3t64 libminiupnpc17 zlib1g libsecp256k1-1 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --create-home --home-dir /data --shell /usr/sbin/nologin hobo
 

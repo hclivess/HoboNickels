@@ -57,11 +57,13 @@ target_include_directories(HoboNickels-qt PRIVATE
 
 target_compile_definitions(HoboNickels-qt PRIVATE ${COMMON_DEFINES} QT_GUI)
 
+target_include_directories(HoboNickels-qt PRIVATE ${SECP256K1_INCLUDE_DIR})
 target_link_libraries(HoboNickels-qt PRIVATE
     leveldb
     Qt5::Core Qt5::Gui Qt5::Widgets Qt5::Network
     Boost::system Boost::filesystem Boost::program_options Boost::thread Boost::chrono
     OpenSSL::SSL OpenSSL::Crypto
+    ${SECP256K1_LIBRARY}
     ${BDBXX_LIBRARY}
     Threads::Threads
     ${CMAKE_DL_LIBS})

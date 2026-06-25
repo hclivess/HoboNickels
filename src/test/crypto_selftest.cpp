@@ -12,6 +12,8 @@
 #include "key.h"
 #include "base58.h"
 
+#include <secp256k1.h>
+
 static uint256 MakeHash(int seed)
 {
     uint256 h;
@@ -108,6 +110,49 @@ BOOST_AUTO_TEST_CASE(hobonickels_address_and_wif_roundtrip)
     CSecret secret2 = bsecret2.GetSecret(compressed2);
     BOOST_CHECK(secret == secret2);
     BOOST_CHECK_EQUAL(compressed, compressed2);
+}
+
+// Verifies the libsecp256k1 fast-verify path (used in script.cpp CheckSig)
+// agrees with OpenSSL for real signatures, and that both reject tampered ones.
+// This underpins the no-fork guarantee of the libsecp256k1 integration.
+BOOST_AUTO_TEST_CASE(secp256k1_matches_openssl)
+{
+    secp256k1_context* ctx = secp256k1_context_create(SECP256K1_CONTEXT_VERIFY);
+    BOOST_REQUIRE(ctx != NULL);
+
+    for (int i = 0; i < 64; i++)
+    {
+        CKey key;
+        key.MakeNewKey(i % 2 == 0); // mix compressed / uncompressed
+        uint256 hash = MakeHash(i + 3);
+
+        std::vector<unsigned char> sig;
+        BOOST_REQUIRE(key.Sign(hash, sig)); // OpenSSL DER signature
+        const std::vector<unsigned char>& pub = key.GetPubKey().Raw();
+
+        // OpenSSL verdict
+        bool osslOk = key.Verify(hash, sig);
+        BOOST_CHECK(osslOk);
+
+        // libsecp256k1 verdict (same steps as VerifyECDSASecp in script.cpp)
+        secp256k1_pubkey pk;
+        BOOST_REQUIRE(secp256k1_ec_pubkey_parse(ctx, &pk, pub.data(), pub.size()));
+        secp256k1_ecdsa_signature s;
+        BOOST_REQUIRE(secp256k1_ecdsa_signature_parse_der(ctx, &s, sig.data(), sig.size()));
+        secp256k1_ecdsa_signature_normalize(ctx, &s, &s);
+        int secpOk = secp256k1_ecdsa_verify(ctx, &s, hash.begin(), &pk);
+
+        // The two libraries must agree on the accept/reject decision.
+        BOOST_CHECK_EQUAL(secpOk == 1, osslOk);
+        BOOST_CHECK_EQUAL(secpOk, 1);
+
+        // A different message must be rejected by BOTH.
+        uint256 other = MakeHash(i + 100000);
+        BOOST_CHECK(!key.Verify(other, sig));
+        BOOST_CHECK_EQUAL(secp256k1_ecdsa_verify(ctx, &s, other.begin(), &pk), 0);
+    }
+
+    secp256k1_context_destroy(ctx);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

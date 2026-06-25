@@ -47,6 +47,14 @@ add_compile_options(-Wno-unused-parameter -Wno-unused-variable -Wno-sign-compare
 # ---------------------------------------------------------------------------
 find_package(OpenSSL REQUIRED)
 
+# libsecp256k1: fast ECDSA verification (with an OpenSSL fallback in script.cpp).
+find_path(SECP256K1_INCLUDE_DIR secp256k1.h)
+find_library(SECP256K1_LIBRARY NAMES secp256k1)
+if(NOT SECP256K1_INCLUDE_DIR OR NOT SECP256K1_LIBRARY)
+    message(FATAL_ERROR "libsecp256k1 not found (install libsecp256k1-dev / mingw-w64-x86_64-libsecp256k1)")
+endif()
+message(STATUS "libsecp256k1: ${SECP256K1_LIBRARY}")
+
 set(Boost_USE_MULTITHREADED ON)
 find_package(Boost 1.71 REQUIRED
     COMPONENTS system filesystem program_options thread chrono)
@@ -173,10 +181,12 @@ endif()
 target_include_directories(hobonickels_core PUBLIC
     ${COMMON_INCLUDE_DIRS} ${BDBXX_INCLUDE_DIR})
 target_compile_definitions(hobonickels_core PUBLIC ${COMMON_DEFINES})
+target_include_directories(hobonickels_core PUBLIC ${SECP256K1_INCLUDE_DIR})
 target_link_libraries(hobonickels_core PUBLIC
     leveldb
     Boost::system Boost::filesystem Boost::program_options Boost::thread Boost::chrono
     OpenSSL::SSL OpenSSL::Crypto
+    ${SECP256K1_LIBRARY}
     ${BDBXX_LIBRARY}
     Threads::Threads
     ${CMAKE_DL_LIBS})
