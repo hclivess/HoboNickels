@@ -32,6 +32,14 @@ layouts:
 - **Theme-safe status labels.** A few dialogs hard-coded `color: black` on status
   labels, which is invisible on a dark background; those now clear their stylesheet
   and inherit the palette text colour, so they read correctly in every theme.
+- **High-resolution status / network icons.** The status-bar and transaction-list
+  glyphs (connection-strength bars, sync, staking, encryption lock, the
+  confirmation clocks and tx-state marks, plus the peers/traffic/info glyphs) were
+  redrawn as a clean, flat 128×128 set in the brand palette (green = good, gold =
+  staking/brand, red = problem). The old icons were 16×16 and blurred when high-DPI
+  scaling upscaled them. The filenames are unchanged, so this is a pure asset swap —
+  no `.qrc` or code change. These are freshly drawn (no third-party assets), so
+  there is no extra licensing/attribution to carry.
 
 The stylesheet only sets spacing/structure and the accent; foreground/background
 colours come from the `QPalette`. That keeps text legible in both themes and
