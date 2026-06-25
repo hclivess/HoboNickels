@@ -130,6 +130,17 @@ jobs:
             | while read -r dll; do cp -v "$dll" dist/HoboNickelsd/; done
           ls -la dist/HoboNickelsd/
 
+      - name: Verify bundle is self-contained (mingw64 off PATH)
+        run: |
+          # Run from the bundle with mingw64 removed from PATH: only the DLLs
+          # shipped alongside the .exe (and Windows system DLLs) can resolve.
+          # If anything is missing the process exits 0xC0000135 (DLL not found).
+          cd dist/HoboNickelsd
+          export PATH="/c/Windows/System32:/c/Windows"
+          out="$(./HoboNickelsd.exe --help 2>&1 || true)"
+          echo "$out" | head -n 5
+          echo "$out" | grep -q "HoboNickels version"
+
       - name: Upload Windows daemon (with DLLs)
         uses: actions/upload-artifact@v4
         with:
@@ -193,6 +204,28 @@ jobs:
           ldd build/HoboNickels-qt.exe | awk '/\/mingw64\/bin\// {print $3}' | sort -u \
             | while read -r dll; do cp -n "$dll" dist/HoboNickels-qt/; done
           ls -la dist/HoboNickels-qt/
+
+      - name: Verify bundle is self-contained (mingw64 off PATH)
+        run: |
+          cd dist/HoboNickels-qt
+          # Required DLLs and the Qt platform plugin must be present.
+          test -f platforms/qwindows.dll
+          for d in Qt5Core.dll Qt5Gui.dll Qt5Widgets.dll Qt5Network.dll \
+                   libgcc_s_seh-1.dll libstdc++-6.dll libwinpthread-1.dll; do
+            test -f "$d" || { echo "MISSING $d"; exit 1; }
+          done
+          ls libcrypto-*.dll
+          # Launch with mingw64 off PATH; a missing/unresolved DLL aborts the
+          # process at load with 0xC0000135 / 0xC0000139 before the GUI starts.
+          export PATH="/c/Windows/System32:/c/Windows"
+          set +e
+          timeout 25 ./HoboNickels-qt.exe -? >/dev/null 2>&1
+          code=$?
+          set -e
+          echo "exit code: $code"
+          if [ "$code" = "3221225781" ] || [ "$code" = "3221225595" ]; then
+            echo "DLL load failure (missing dependency)"; exit 1
+          fi
 
       - name: Upload Windows Qt GUI (with DLLs)
         uses: actions/upload-artifact@v4
