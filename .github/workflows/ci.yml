@@ -218,9 +218,11 @@ jobs:
       - name: Verify bundle is self-contained (mingw64 off PATH)
         run: |
           cd dist/HoboNickels-qt
-          # Required DLLs and the Qt platform plugin must be present.
+          # Required DLLs and the Qt platform plugin must be present. (Qt5Network
+          # is linked but unused by the GUI, so --as-needed drops it; the run
+          # test below is the authoritative completeness check.)
           test -f platforms/qwindows.dll
-          for d in Qt5Core.dll Qt5Gui.dll Qt5Widgets.dll Qt5Network.dll \
+          for d in Qt5Core.dll Qt5Gui.dll Qt5Widgets.dll \
                    libgcc_s_seh-1.dll libstdc++-6.dll libwinpthread-1.dll; do
             test -f "$d" || { echo "MISSING $d"; exit 1; }
           done
