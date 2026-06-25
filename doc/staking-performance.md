@@ -82,13 +82,14 @@ network:
 - **`EraseStakeForCharity` fix** (walletdb.h): the `s4c2` record erase was
   unreachable (it followed a `return`), so disabling S4C left an orphaned record.
 
-> The metadata cache is build-verified and reasoned-correct, but **not yet
-> runtime-validated on a live staking wallet** — a fresh node here cannot stake
-> (the loop is peer-gated, the public testnet is effectively dead, and there is no
-> `generate` RPC to self-mine spendable coins). Before it merges to `main` it should
-> be validated on a real chain by diffing the produced block / coinstake / kernel
-> hashes against the current binary. It currently lives on the
-> `staking-metadata-cache` branch.
+> **Validation status.** The metadata cache is CI-validated on all platforms
+> (daemon + GUI, Linux + Windows + Docker) and reasoned byte-identical / network-safe
+> as above, but it has **not been observed on a live staking node** — a fresh node
+> here cannot stake (the loop is peer-gated, the public testnet is effectively dead,
+> and there is no `generate` RPC to self-mine spendable coins). It was merged on the
+> maintainer's decision; operators running a staker should confirm staking continues
+> normally and, for full assurance, diff produced block / coinstake / kernel hashes
+> against the previous binary on a real chain.
 
 ## Deferring the per-attempt block build (busy-chain win; lower priority here)
 
