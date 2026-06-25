@@ -1105,7 +1105,9 @@ public:
         int64_t nMaxCacheSize = GetArg("-maxsigcachesize", 50000);
         if (nMaxCacheSize <= 0) return;
 
-        boost::shared_lock<boost::shared_mutex> lock(cs_sigcache);
+        // Exclusive lock: Set() mutates setValid (eviction + insert). A shared_lock
+        // here was a data race against concurrent readers/writers.
+        boost::unique_lock<boost::shared_mutex> lock(cs_sigcache);
 
         while (static_cast<int64_t>(setValid.size()) > nMaxCacheSize)
         {

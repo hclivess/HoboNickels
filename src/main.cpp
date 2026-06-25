@@ -1531,6 +1531,7 @@ void static InvalidChainFound(CBlockIndex* pindexNew)
 void CBlock::UpdateTime(const CBlockIndex* pindexPrev)
 {
     nTime = max(GetBlockTime(), GetAdjustedTime());
+    fHashCached = false; // header time changed; drop the cached block hash
 }
 
 
@@ -2297,11 +2298,13 @@ bool CTransaction::GetCoinAge(CTxDB& txdb, uint64_t& nCoinAge) const
         int64_t nValueIn = txPrev.vout[txin.prevout.n].nValue;
         bnCentSecond += CBigNum(nValueIn) * (nTime-txPrev.nTime) / CENT;
 
-        LogPrint("coinage", "coin age nValueIn=%d nTimeDiff=%d bnCentSecond=%s\n", nValueIn, nTime - txPrev.nTime, bnCentSecond.ToString());
+        if (fDebug) // skip the CBigNum->string formatting unless actually logging
+            LogPrint("coinage", "coin age nValueIn=%d nTimeDiff=%d bnCentSecond=%s\n", nValueIn, nTime - txPrev.nTime, bnCentSecond.ToString());
     }
 
     CBigNum bnCoinDay = bnCentSecond * CENT / COIN / (24 * 60 * 60);
-    LogPrint("coinage", "coin age bnCoinDay=%s\n", bnCoinDay.ToString());
+    if (fDebug)
+        LogPrint("coinage", "coin age bnCoinDay=%s\n", bnCoinDay.ToString());
     nCoinAge = bnCoinDay.getuint64();
     return true;
 }
@@ -2807,6 +2810,7 @@ bool CBlock::SignPoSBlock(CWallet& wallet)
 
                 vtx.insert(vtx.begin() + 1, txCoinStake);
                 hashMerkleRoot = BuildMerkleTree();
+                fHashCached = false; // nTime + merkle root changed; recompute the hash
 
                 // append a signature to our block
                 return key.Sign(GetHash(), vchBlockSig);
@@ -3043,6 +3047,7 @@ bool LoadBlockIndex(bool fAllowNew)
 			       LogPrintf("NONCE WRAPPED, incrementing time");
 		               ++block.nTime;
 		           }
+		           block.fHashCached = false; // nonce/time grinding; recompute next hash
 		       }
         }
 

@@ -373,8 +373,10 @@ bool ScanForStakeKernelHash(MetaMap &mapMeta, KernelSearchSettings &settings, Co
         if (!pwallet->GetCoinsDataActual())
             break;
 
-        CTxIndex txindex = (*meta_item).second.first.first;
-        CBlock block = (*meta_item).second.second.first;
+        // Read-only views into the cached mapMeta entry; copying the full CBlock
+        // (its tx vector) and CTxIndex here ran on every coin, every staking poll.
+        const CTxIndex& txindex = (*meta_item).second.first.first;
+        const CBlock& block = (*meta_item).second.second.first;
         uint64_t nStakeModifier = (*meta_item).second.second.second;
 
         // Get coin
