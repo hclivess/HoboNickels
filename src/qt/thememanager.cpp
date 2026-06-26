@@ -88,6 +88,14 @@ QString styleSheet(bool dark)
     css += "QPushButton:disabled { color: " + border + "; }";
     css += "QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QComboBox { padding: 4px 6px; border: 1px solid " + border + "; border-radius: 6px; background: " + base + "; color: " + text + "; }";
     css += "QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus { border-color: " + accent + "; }";
+    // Styling a spin box via stylesheet makes Qt take over its up/down sub-controls, and
+    // without explicit arrows they render blank. Restore proper increment/decrement
+    // buttons with arrow images so the amount fields keep working +/- controls.
+    css += "QSpinBox::up-button, QDoubleSpinBox::up-button { subcontrol-origin: border; subcontrol-position: top right; width: 16px; border-left: 1px solid " + border + "; border-top-right-radius: 6px; }";
+    css += "QSpinBox::down-button, QDoubleSpinBox::down-button { subcontrol-origin: border; subcontrol-position: bottom right; width: 16px; border-left: 1px solid " + border + "; border-bottom-right-radius: 6px; }";
+    css += "QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover, QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover { background: " + hover + "; }";
+    css += "QSpinBox::up-arrow, QDoubleSpinBox::up-arrow { image: url(:/icons/spin_up); width: 9px; height: 6px; }";
+    css += "QSpinBox::down-arrow, QDoubleSpinBox::down-arrow { image: url(:/icons/spin_down); width: 9px; height: 6px; }";
     css += "QTabBar::tab { padding: 6px 12px; }";
     css += "QTabBar::tab:selected { border-bottom: 2px solid " + accent + "; }";
     css += "QHeaderView::section { padding: 4px; border: 0; border-bottom: 1px solid " + border + "; background: " + panel + "; }";
