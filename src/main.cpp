@@ -108,14 +108,20 @@ static int64_t g_nLastOrphanGetBlocks = 0;
 static std::deque<uint256> g_vBlocksToDownload;            // queued, not yet requested (chain order)
 static std::set<uint256> g_setBlocksQueuedOrInFlight;     // dedup membership (queued ∪ in-flight)
 static std::map<uint256, std::pair<NodeId, int64_t> > g_mapBlocksInFlight; // hash -> (peer id, request time s)
-static const size_t MAX_BLOCKS_IN_FLIGHT_PER_PEER = 16;
-// Smart requesting: don't fetch faster than we can connect. We stop requesting blocks
-// further ahead once this many out-of-order blocks are already buffered waiting for the
-// tip to reach them. This keeps the reorder buffer well under MAX_ORPHAN_BLOCKS (so a
-// still-needed block is never evicted -> no stalls), bounds orphan churn, and is far
-// above any normal per-tick window so healthy sync is never throttled. The stall-breaker
-// is deliberately NOT gated by this -- recovering the wedge block is always allowed.
-static const size_t MAX_REORDER_BUFFER = 256;
+static std::map<uint256, int> g_mapBlockHeight;           // hash -> height (for the height-relative window)
+static std::map<NodeId, int64_t> g_mapPeerLastBlockTime;  // peer -> last time it delivered any block (s);
+                                                          // distinguishes a slow-but-working peer from a dead one
+// HoboNickels blocks are tiny (PoS), so a Bitcoin-style 16-block window barely uses the
+// link -- especially when only one peer is serving. Use a much larger per-peer window so
+// a single peer's pipe stays full; the height-relative window below bounds how far ahead
+// we actually fetch, so this can't run away.
+static const size_t MAX_BLOCKS_IN_FLIGHT_PER_PEER = 128;
+// Smart requesting, the RIGHT way: only fetch blocks within this many heights of the tip.
+// This bounds the reorder buffer by *height distance* (not raw count), so the buffer can
+// never run past MAX_ORPHAN_BLOCKS (no eviction -> no stalls) AND the wedge block (tip+1,
+// always inside the window) is always (re)fetchable -- which the old raw-count gate broke
+// once the buffer filled. Replaces MAX_REORDER_BUFFER.
+static const int BLOCK_DOWNLOAD_WINDOW = 1024;
 static const int64_t BLOCK_DOWNLOAD_TIMEOUT = 30;         // seconds before fully re-assigning a stuck request
 static const int64_t BLOCK_STALL_TIMEOUT = 10;            // seconds before *redundantly* re-requesting the oldest
                                                           // outstanding block from a second peer once the queue
@@ -3893,7 +3899,7 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
             return true;
 
         CTxDB txdb("r");
-        std::set<uint256> setBatch;   // hashes accepted earlier in THIS message
+        std::map<uint256, int> mapBatch;   // hash -> height, accepted earlier in THIS message
         int nQueued = 0, nConnected = 0;
         for (const CBlock& header : vHeaders)
         {
@@ -3905,11 +3911,21 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
             // hashes / getdata per message. Forging a *connecting* chain costs the
             // attacker the same scrypt work, so it is no longer cheap.
             const uint256& prev = header.hashPrevBlock;
-            if (!mapBlockIndex.count(prev) && !setBatch.count(prev))
-                continue;
+            int nPrevHeight;
+            std::map<uint256, CBlockIndex*>::iterator mi = mapBlockIndex.find(prev);
+            if (mi != mapBlockIndex.end())
+                nPrevHeight = mi->second->nHeight;
+            else
+            {
+                std::map<uint256, int>::iterator bi = mapBatch.find(prev);
+                if (bi == mapBatch.end())
+                    continue;   // doesn't connect to anything we know
+                nPrevHeight = bi->second;
+            }
             ++nConnected;
+            int nHeight = nPrevHeight + 1;
             CInv inv(MSG_BLOCK, header.GetHash());   // scrypt, only for connecting headers
-            setBatch.insert(inv.hash);
+            mapBatch[inv.hash] = nHeight;
             if (!AlreadyHave(txdb, inv) && !g_setBlocksQueuedOrInFlight.count(inv.hash))
             {
                 pfrom->AddInventoryKnown(inv);
@@ -3917,6 +3933,7 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
                 // single sending peer, so the download spreads across all peers.
                 g_vBlocksToDownload.push_back(inv.hash);
                 g_setBlocksQueuedOrInFlight.insert(inv.hash);
+                g_mapBlockHeight[inv.hash] = nHeight;   // for the height-relative window
                 ++nQueued;
             }
         }
@@ -4003,6 +4020,11 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
 
         CInv inv(MSG_BLOCK, hashBlock);
         pfrom->AddInventoryKnown(inv);
+
+        // This peer is alive and delivering (even a dup/orphan counts), so the scheduler
+        // won't reassign its other in-flight blocks out from under it (which would just
+        // produce duplicates when it delivers them a moment later).
+        g_mapPeerLastBlockTime[pfrom->GetId()] = GetTime();
 
         bool fAccepted = ProcessBlock(pfrom, &block);
         if (fAccepted)
@@ -4530,11 +4552,19 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
         if (GetBoolArg("-headersfirst", true) && pto->fSuccessfullyConnected && !pto->fDisconnect)
         {
             int64_t nNowSec = GetTime();
-            // Re-queue blocks whose download fully timed out (slow or disconnected peer).
+            // Re-queue overdue blocks -- but don't steal from a peer that's actively
+            // delivering. A slow-but-working peer is just chewing through its backlog;
+            // reassigning its block only to have it deliver a moment later is what
+            // produced the residual "already have block" duplicates. So reassign only if
+            // the owning peer has gone quiet (no block within BLOCK_STALL_TIMEOUT), or as
+            // a hard backstop once a request is wildly overdue (2x the timeout).
             for (std::map<uint256, std::pair<NodeId, int64_t> >::iterator it = g_mapBlocksInFlight.begin();
                  it != g_mapBlocksInFlight.end(); )
             {
-                if (nNowSec - it->second.second > BLOCK_DOWNLOAD_TIMEOUT)
+                int64_t nReqAge = nNowSec - it->second.second;
+                std::map<NodeId, int64_t>::const_iterator la = g_mapPeerLastBlockTime.find(it->second.first);
+                bool fPeerActive = (la != g_mapPeerLastBlockTime.end() && nNowSec - la->second <= BLOCK_STALL_TIMEOUT);
+                if (nReqAge > 2 * BLOCK_DOWNLOAD_TIMEOUT || (nReqAge > BLOCK_DOWNLOAD_TIMEOUT && !fPeerActive))
                 {
                     g_vBlocksToDownload.push_front(it->first);   // retry, prioritised
                     g_mapBlocksInFlight.erase(it++);
@@ -4548,20 +4578,25 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
                  it != g_mapBlocksInFlight.end(); ++it)
                 if (it->second.first == pto->GetId())
                     ++nInFlight;
-            // Assign up to the per-peer window -- but stop fetching further ahead while
-            // a big reorder buffer is already waiting for the tip (smart requesting:
-            // don't outrun the connect rate, or the buffer runs away and evicts a
-            // still-needed block). The stall-breaker below is NOT gated by this, so the
-            // wedge block can always be (re)fetched to let the tip catch up.
+            // Assign up to the per-peer window, but never fetch a block more than
+            // BLOCK_DOWNLOAD_WINDOW heights ahead of the tip. The queue is in chain
+            // order, so the front is the lowest height; once it's past the window,
+            // everything behind it is too, and we stop. This bounds the reorder buffer
+            // by height (no runaway, no eviction) while always allowing the wedge
+            // (tip+1, inside the window) to be (re)fetched.
+            int nTipHeight = pindexBest ? pindexBest->nHeight : 0;
             std::vector<CInv> vGetBlocks;
-            while (nInFlight < MAX_BLOCKS_IN_FLIGHT_PER_PEER && !g_vBlocksToDownload.empty() &&
-                   mapOrphanBlocks.size() < MAX_REORDER_BUFFER)
+            while (nInFlight < MAX_BLOCKS_IN_FLIGHT_PER_PEER && !g_vBlocksToDownload.empty())
             {
                 uint256 h = g_vBlocksToDownload.front();
+                std::map<uint256, int>::iterator hi = g_mapBlockHeight.find(h);
+                if (hi != g_mapBlockHeight.end() && hi->second > nTipHeight + BLOCK_DOWNLOAD_WINDOW)
+                    break;   // front is too far ahead of the tip; wait for it to advance
                 g_vBlocksToDownload.pop_front();
                 if (mapBlockIndex.count(h) || mapOrphanBlocks.count(h))   // already have / buffered
                 {
                     g_setBlocksQueuedOrInFlight.erase(h);
+                    g_mapBlockHeight.erase(h);
                     continue;
                 }
                 if (g_mapBlocksInFlight.count(h))   // already assigned to another peer
@@ -4570,37 +4605,45 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
                 g_mapBlocksInFlight[h] = std::make_pair(pto->GetId(), nNowSec);
                 ++nInFlight;
             }
-            // Stall-breaker. If the queue has drained but this peer still has spare
-            // window, the tip is probably wedged on a block assigned to a slow peer:
-            // everything past it arrives and piles up as orphans, the tip can't
-            // advance, and the header look-ahead (gated on tip progress) never refills
-            // the queue -- so every other peer goes idle while one laggard holds the
-            // critical block for the full timeout. Redundantly re-request the OLDEST
-            // outstanding block (the likely wedge) from THIS peer so a fast peer can
-            // satisfy it now. We hand ownership (and a fresh clock) to this peer; if
-            // the original also delivers, ProcessBlock just drops the duplicate.
-            if (nInFlight < MAX_BLOCKS_IN_FLIGHT_PER_PEER && g_vBlocksToDownload.empty() &&
-                !g_mapBlocksInFlight.empty())
+            // Stall-breaker. If this peer has spare window but the tip is wedged on a
+            // block that's been outstanding on a slow peer for a while, everything past
+            // it just buffers and the tip can't advance. Redundantly re-request the
+            // OLDEST outstanding block (the likely wedge) from THIS peer so a fast peer
+            // can satisfy it now. Gated on the block being >BLOCK_STALL_TIMEOUT old, so
+            // it only fires on a genuine stall (not normal fast sync); the height window
+            // means the queue is rarely empty, so we no longer require that.
+            if (nInFlight < MAX_BLOCKS_IN_FLIGHT_PER_PEER && !g_mapBlocksInFlight.empty())
             {
-                uint256 hOldest;
-                int64_t nOldest = nNowSec;
+                // Pick the LOWEST-HEIGHT outstanding block that's been stuck on another
+                // peer past the stall timeout -- that's the actual wedge holding the tip.
+                // Targeting by height (not request time) avoids redundantly re-fetching a
+                // far-ahead slow block that isn't blocking progress (which only wastes
+                // bandwidth as a duplicate).
+                uint256 hWedge;
+                int nLowest = 0;
                 bool fFound = false;
                 for (std::map<uint256, std::pair<NodeId, int64_t> >::const_iterator it = g_mapBlocksInFlight.begin();
                      it != g_mapBlocksInFlight.end(); ++it)
                 {
                     if (it->second.first != pto->GetId() &&
-                        nNowSec - it->second.second > BLOCK_STALL_TIMEOUT &&
-                        it->second.second < nOldest)
+                        nNowSec - it->second.second > BLOCK_STALL_TIMEOUT)
                     {
-                        nOldest = it->second.second;
-                        hOldest = it->first;
-                        fFound = true;
+                        std::map<uint256, int>::iterator hi = g_mapBlockHeight.find(it->first);
+                        int nH = (hi != g_mapBlockHeight.end()) ? hi->second : 0;
+                        if (!fFound || nH < nLowest)
+                        {
+                            nLowest = nH;
+                            hWedge = it->first;
+                            fFound = true;
+                        }
                     }
                 }
-                if (fFound && !mapBlockIndex.count(hOldest) && !mapOrphanBlocks.count(hOldest))
+                // Only re-request if it's actually near the tip (blocking progress).
+                if (fFound && nLowest <= nTipHeight + (int)MAX_BLOCKS_IN_FLIGHT_PER_PEER &&
+                    !mapBlockIndex.count(hWedge) && !mapOrphanBlocks.count(hWedge))
                 {
-                    vGetBlocks.push_back(CInv(MSG_BLOCK, hOldest));
-                    g_mapBlocksInFlight[hOldest] = std::make_pair(pto->GetId(), nNowSec);
+                    vGetBlocks.push_back(CInv(MSG_BLOCK, hWedge));
+                    g_mapBlocksInFlight[hWedge] = std::make_pair(pto->GetId(), nNowSec);
                 }
             }
             if (!vGetBlocks.empty())
@@ -4631,6 +4674,25 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
                               (unsigned)setDownloadPeers.size(),
                               (unsigned)g_vBlocksToDownload.size(),
                               (unsigned)mapOrphanBlocks.size());
+                }
+            }
+
+            // Prune the height bookkeeping for blocks at/below the tip (connected, so no
+            // longer relevant to the download window), keeping g_mapBlockHeight bounded
+            // to roughly the active window + queue.
+            {
+                static int64_t nLastHeightPrune = 0;
+                if (nNowSec - nLastHeightPrune >= 30 && pindexBest)
+                {
+                    nLastHeightPrune = nNowSec;
+                    int nTip = pindexBest->nHeight;
+                    for (std::map<uint256, int>::iterator it = g_mapBlockHeight.begin(); it != g_mapBlockHeight.end(); )
+                    {
+                        if (it->second <= nTip)
+                            g_mapBlockHeight.erase(it++);
+                        else
+                            ++it;
+                    }
                 }
             }
         }
