@@ -244,7 +244,13 @@ int main(int argc, char *argv[])
     }
 
 
-    QSplashScreen splash(QPixmap(":/images/splash"), 0);
+    // Render the high-resolution (762px) coin at ~512 logical px so the splash stays a
+    // sensible size while staying crisp -- on a Hi-DPI display Qt uses the extra pixels
+    // (AA_UseHighDpiPixmaps), and on a normal display it down-samples smoothly instead
+    // of up-scaling a small image (the old pixelation).
+    QPixmap splashPixmap(":/images/splash");
+    splashPixmap.setDevicePixelRatio(splashPixmap.width() / 512.0);
+    QSplashScreen splash(splashPixmap, 0);
     if (GetBoolArg("-splash", true) && !GetBoolArg("-min"))
     {
         splash.show();
