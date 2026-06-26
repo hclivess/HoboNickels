@@ -174,6 +174,8 @@ void RegisterNodeSignals(CNodeSignals& nodeSignals);
 /** Unregister a network node */
 void UnregisterNodeSignals(CNodeSignals& nodeSignals);
 bool ProcessBlock(CNode* pfrom, CBlock* pblock);
+/** Connect a bounded batch of buffered out-of-order blocks; true if more likely remain. */
+bool DrainBufferedBlocks();
 bool CheckDiskSpace(uint64_t nAdditionalBytes=0);
 FILE* OpenBlockFile(unsigned int nFile, unsigned int nBlockPos, const char* pszMode="rb");
 FILE* AppendBlockFile(unsigned int& nFileRet);
@@ -194,6 +196,7 @@ void SnapWant();
 bool SnapFetching();
 void SnapFetchSendMessages(CNode* pto);
 extern bool g_fRestartForSnapshot;
+extern bool g_fMsgMoreWork;   // a ProcessMessages pass stopped early with work still queued
 
 // Run an instance of the script checking thread
 void ThreadScriptCheck(void* parg);

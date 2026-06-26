@@ -452,6 +452,14 @@ unsigned int LimitOrphanTxSize(unsigned int nMaxOrphans)
 // flooding genuinely unconnectable orphans.
 static const unsigned int MAX_ORPHAN_BLOCKS = 2000;
 
+// Connecting buffered out-of-order ("orphan") blocks: a fast multi-peer download buffers a
+// long run of ahead-of-tip blocks while the wedge (tip+1) is in flight, and when it lands
+// they ALL become connectable in one cascade. Connecting hundreds under a single cs_main
+// hold froze RPC and the GUI for seconds, so we connect a bounded batch per call and finish
+// the rest on later message-handler passes (cs_main released in between).
+static const int64_t MAX_ORPHANDRAIN_MS = 30;
+static const int     MAX_ORPHANDRAIN_BLOCKS = 256;   // hard backstop on top of the time bound
+
 unsigned int LimitOrphanBlocks(unsigned int nMaxOrphans)
 {
     unsigned int nEvicted = 0;
@@ -2736,6 +2744,52 @@ uint256 CBlockIndex::GetBlockTrust() const
     }
 }
 
+// Connect buffered out-of-order ("orphan") blocks that now attach to the chain, starting
+// from hashStart, but at most a bounded batch (by count and wall-clock) per call. Whatever
+// isn't connected stays buffered and is picked up by DrainBufferedBlocks() on a later
+// message-handler pass, so we never monopolise cs_main for a long catch-up run. Returns
+// true if buffered blocks may still remain attachable (caller should run again soon).
+static bool ProcessBufferedBlocks(const uint256& hashStart, int nMaxBlocks)
+{
+    AssertLockHeld(cs_main);
+    int64_t nStart = GetTimeMillis();
+    int nConnected = 0;
+    std::vector<uint256> vWorkQueue;
+    vWorkQueue.push_back(hashStart);
+    for (unsigned int i = 0; i < vWorkQueue.size(); i++)
+    {
+        uint256 hashPrev = vWorkQueue[i];
+        for (std::multimap<uint256, CBlock*>::iterator mi = mapOrphanBlocksByPrev.lower_bound(hashPrev);
+             mi != mapOrphanBlocksByPrev.upper_bound(hashPrev); )
+        {
+            CBlock* pblockOrphan = (*mi).second;
+            uint256 hashOrphan = pblockOrphan->GetHash();
+            if (pblockOrphan->AcceptBlock())
+                vWorkQueue.push_back(hashOrphan);
+            mapOrphanBlocks.erase(hashOrphan);
+            setStakeSeenOrphan.erase(pblockOrphan->GetProofOfStake());
+            mapOrphanBlocksByPrev.erase(mi++);   // standard safe multimap erase-while-iterating
+            delete pblockOrphan;
+            // Stop after a bounded batch (always make >=1 block of progress first), leaving
+            // the rest buffered for the next pass so cs_main is released frequently.
+            if (++nConnected >= nMaxBlocks || GetTimeMillis() - nStart > MAX_ORPHANDRAIN_MS)
+                return true;
+        }
+    }
+    return false;
+}
+
+// Called once per message-handler pass: connect a bounded batch of buffered blocks that now
+// attach to the active tip. The fast racy emptiness check avoids taking cs_main when there's
+// nothing to do. Returns true if more buffered blocks likely remain (loop again promptly).
+bool DrainBufferedBlocks()
+{
+    if (mapOrphanBlocksByPrev.empty())
+        return false;
+    LOCK(cs_main);
+    return ProcessBufferedBlocks(hashBestChain, MAX_ORPHANDRAIN_BLOCKS);
+}
+
 bool ProcessBlock(CNode* pfrom, CBlock* pblock)
 {
      AssertLockHeld(cs_main);
@@ -2835,25 +2889,11 @@ bool ProcessBlock(CNode* pfrom, CBlock* pblock)
     if (!pblock->AcceptBlock())
         return error("ProcessBlock() : AcceptBlock FAILED");
 
-    // Recursively process any orphan blocks that depended on this one
-    vector<uint256> vWorkQueue;
-    vWorkQueue.push_back(hash);
-    for (unsigned int i = 0; i < vWorkQueue.size(); i++)
-    {
-        uint256 hashPrev = vWorkQueue[i];
-        for (multimap<uint256, CBlock*>::iterator mi = mapOrphanBlocksByPrev.lower_bound(hashPrev);
-             mi != mapOrphanBlocksByPrev.upper_bound(hashPrev);
-             ++mi)
-        {
-            CBlock* pblockOrphan = (*mi).second;
-            if (pblockOrphan->AcceptBlock())
-                vWorkQueue.push_back(pblockOrphan->GetHash());
-            mapOrphanBlocks.erase(pblockOrphan->GetHash());
-            setStakeSeenOrphan.erase(pblockOrphan->GetProofOfStake());
-            delete pblockOrphan;
-        }
-        mapOrphanBlocksByPrev.erase(hashPrev);
-    }
+    // Connect any buffered orphan blocks that depended on this one, in a bounded batch.
+    // The message handler's DrainBufferedBlocks() finishes any remainder on later passes,
+    // so a long run of out-of-order blocks (common during fast multi-peer sync) can't hold
+    // cs_main for seconds and freeze RPC / the GUI.
+    ProcessBufferedBlocks(hash, MAX_ORPHANDRAIN_BLOCKS);
 
     LogPrintf("ProcessBlock: ACCEPTED\n");
 
@@ -3537,6 +3577,15 @@ struct CSnapFetch {
 };
 static CSnapFetch g_snap;
 bool g_fRestartForSnapshot = false;   // set when a fetched snapshot is staged -> re-exec to apply
+
+// Responsiveness: ProcessMessages connects all queued blocks under cs_main, which a peer
+// can fill with a large download batch. Bounding one pass to a few tens of ms keeps cs_main
+// from being monopolised for whole seconds, so RPC (which LOCK2 cs_main) and the GUI poll
+// (which TRY_LOCK cs_main) get frequent windows during sync. g_fMsgMoreWork tells the
+// message-handler thread that a pass stopped early so it can loop again promptly instead of
+// taking its full inter-pass sleep (keeps sync throughput up).
+static const int64_t MAX_PROCESSMESSAGES_MS = 30;
+bool g_fMsgMoreWork = false;
 
 void SnapWant() { if (!g_snap.fDone) { g_snap.fWanted = true; g_snap.nWantStart = GetTime(); } }
 bool SnapFetching() { return g_snap.fWanted && !g_snap.fDone; }   // pause normal block sync while true
@@ -4666,6 +4715,7 @@ bool ProcessMessages(CNode* pfrom)
     //
     bool fOk = true;
 
+    int64_t nPassStart = GetTimeMillis();
     std::deque<CNetMessage>::iterator it = pfrom->vRecvMsg.begin();
     while (!pfrom->fDisconnect && it != pfrom->vRecvMsg.end()) {
         // Don't bother if send buffer is too full to respond anyway
@@ -4757,6 +4807,14 @@ bool ProcessMessages(CNode* pfrom)
 
         if (!fRet)
             LogPrintf("ProcessMessage(%s, %u bytes) FAILED\n", strCommand, nMessageSize);
+
+        // Don't monopolise cs_main for a whole download batch: stop after a bounded slice
+        // and leave the rest queued for the next pass, so RPC and the GUI get a window.
+        // (it has already advanced past the processed message, so the erase below is exact.)
+        if (GetTimeMillis() - nPassStart > MAX_PROCESSMESSAGES_MS) {
+            g_fMsgMoreWork = true;
+            break;
+        }
     }
 
     // In case the connection got shut down, its receive buffer was wiped

@@ -1801,6 +1801,7 @@ void ThreadMessageHandler2(void* parg)
             StartSync(vNodesCopy);
 
         // Poll the connected nodes for messages
+        g_fMsgMoreWork = false;   // set by ProcessMessages if a pass stops early with work left
         CNode* pnodeTrickle = NULL;
         if (!vNodesCopy.empty())
             pnodeTrickle = vNodesCopy[GetRand(vNodesCopy.size())];
@@ -1835,11 +1836,20 @@ void ThreadMessageHandler2(void* parg)
                 pnode->Release();
         }
 
+        // Finish connecting any buffered out-of-order blocks in a bounded batch. If more
+        // remain, loop again promptly (below) so a big catch-up still drains fast while
+        // cs_main is released between batches, keeping RPC and the GUI responsive.
+        if (DrainBufferedBlocks())
+            g_fMsgMoreWork = true;
+
         // Wait and allow messages to bunch up.
         // Reduce vnThreadsRunning so StopNode has permission to exit while
         // we're sleeping, but we must always check fShutdown after doing this.
+        // If a ProcessMessages pass stopped early (a peer still has a block backlog
+        // queued), loop again promptly after a brief yield instead of the full 100ms,
+        // so bounding the cs_main hold for responsiveness doesn't throttle sync.
         vnThreadsRunning[THREAD_MESSAGEHANDLER]--;
-        MilliSleep(100);
+        MilliSleep(g_fMsgMoreWork ? 2 : 100);
         if (fRequestShutdown)
             StartShutdown();
         vnThreadsRunning[THREAD_MESSAGEHANDLER]++;
