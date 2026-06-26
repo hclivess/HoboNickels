@@ -2241,25 +2241,60 @@ bool CWallet::CreateCoinStake(const CKeyStore& keystore, unsigned int nBits, int
     }
 
     // Calculate coin age reward
+    int64_t nReward = 0;
     {
         uint64_t nCoinAge;
         CTxDB txdb("r");
         if (!txNew.GetCoinAge(txdb, nCoinAge))
             return error("CreateCoinStake : failed to calculate coin age");
-        nCredit += GetProofOfStakeReward(nCoinAge, nBits, txNew.nTime);
+        nReward = GetProofOfStakeReward(nCoinAge, nBits, txNew.nTime);
+        nCredit += nReward;
+    }
+
+    // Stake For Charity (coinstake injection): pay a configured slice of the stake REWARD
+    // to the charity address as an extra output of this coinstake -- atomic with the
+    // stake, no separate transaction or fee. Non-consensus: validation only checks the
+    // coinstake's TOTAL value (inputs + reward), not how it is split across outputs, so
+    // this changes nothing a validator enforces. Strictly a no-op when S4C is disabled,
+    // so ordinary staking is byte-identical. (NEEDS live/testnet staking validation.)
+    bool fSplit = (txNew.vout.size() == 3);   // split staker output present? capture before charity
+    int64_t nCharity = 0;
+    if (fStakeForCharity && nStakeForCharityPercent > 0 && strStakeForCharityAddress.IsValid())
+    {
+        nCharity = (nReward * nStakeForCharityPercent) / 100;
+        if (nStakeForCharityMax > 0 && nCharity > nStakeForCharityMax)
+            nCharity = nStakeForCharityMax;                 // cap per stake
+        if (nStakeForCharityMin > 0 && nCharity < nStakeForCharityMin)
+            nCharity = 0;                                   // below the configured minimum -> skip
+        if (nCharity >= MIN_TXOUT_AMOUNT && nCharity < nReward)
+        {
+            CScript scriptCharity;
+            scriptCharity.SetDestination(strStakeForCharityAddress.Get());
+            txNew.vout.push_back(CTxOut(0, scriptCharity)); // value assigned in the loop below
+            LogPrint("coinstake", "CreateCoinStake : S4C %s to %s\n",
+                     FormatMoney(nCharity).c_str(), strStakeForCharityAddress.ToString().c_str());
+        }
+        else
+            nCharity = 0;
     }
 
     int64_t nMinFee = 0;
     while (true)
     {
-        // Set output amount
-        if (txNew.vout.size() == 3)
+        // Set output amount. Reserve the Stake-For-Charity slice (nCharity, 0 when
+        // disabled) for the appended charity output; distribute the rest to the staker
+        // (split or single). Using fSplit (captured before the charity output) keeps the
+        // split detection correct now that vout may carry an extra output.
+        int64_t nStakerValue = nCredit - nMinFee - nCharity;
+        if (fSplit)
         {
-            txNew.vout[1].nValue = ((nCredit - nMinFee) / 2 / CENT) * CENT;
-            txNew.vout[2].nValue = nCredit - nMinFee - txNew.vout[1].nValue;
+            txNew.vout[1].nValue = (nStakerValue / 2 / CENT) * CENT;
+            txNew.vout[2].nValue = nStakerValue - txNew.vout[1].nValue;
         }
         else
-            txNew.vout[1].nValue = nCredit - nMinFee;
+            txNew.vout[1].nValue = nStakerValue;
+        if (nCharity > 0)
+            txNew.vout.back().nValue = nCharity;   // the charity output was appended last
 
         // Sign
         int nIn = 0;

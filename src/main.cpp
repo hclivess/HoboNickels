@@ -2855,8 +2855,11 @@ bool ProcessBlock(CNode* pfrom, CBlock* pblock)
 
     LogPrintf("ProcessBlock: ACCEPTED\n");
 
-    if (fGlobalStakeForCharity && !IsInitialBlockDownload())
-        pWalletManager->StakeForCharity();
+    // Stake For Charity is now paid directly inside the coinstake (CWallet::CreateCoinStake)
+    // -- atomic with the stake, no separate transaction/fee -- so the old post-block
+    // separate-send path is disabled to avoid paying the charity twice.
+    // if (fGlobalStakeForCharity && !IsInitialBlockDownload())
+    //     pWalletManager->StakeForCharity();
 
     // ppcoin: if responsible for sync-checkpoint send it
     if (pfrom && !CSyncCheckpoint::strMasterPrivKey.empty())
