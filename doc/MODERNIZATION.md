@@ -50,16 +50,35 @@ built from source (static) via CMake FetchContent.
 
 ## 4. Faster initial sync
 
+- **Headers-first download** (default on) — learn the chain ahead from cheap ~80-byte
+  headers via `getheaders`, then pull full blocks through a rolling window, instead of
+  the legacy 500-block `getblocks → inv → getdata` round-trips. Wire-compatible, no
+  `PROTOCOL_VERSION` change, peers don't need to upgrade. See
+  [`headers-first-sync.md`](headers-first-sync.md).
+- **Multi-peer parallel block download** — the in-flight window is spread across all
+  connected peers with per-block accounting (no duplicate fetches) and a timeout
+  re-queue, instead of serializing the download on a single peer. The largest IBD win
+  on a fast CPU.
+- **scrypt cost reduction** — `GetHash` is memoized (each block/header is hashed once),
+  non-connecting junk headers are dropped *before* any scrypt work, and the scrypt TU
+  is compiled at `-O3`. See [`proposals/drop-scrypt-hardfork.md`](proposals/drop-scrypt-hardfork.md)
+  for the larger (fork-requiring) option of dropping scrypt entirely.
 - **Dynamic checkpointing** — signatures are re-verified only for the most recent
   `-checkpointdepth` blocks (default 500); older history is trusted. The
   hardcoded checkpoints are a hard floor and still hash-anchor the chain, so
   substituted history is rejected. `-checkpointdepth=0` re-verifies everything.
 - **Recent checkpoints** added up to height 7,990,000.
-- **LevelDB tuning** — default `-dbcache` raised 25 → 64 MB plus a write-buffer
+- **LevelDB tuning** — default `-dbcache` raised 25 → 256 MB plus a write-buffer
   bump (fewer disk reads / compactions during IBD).
 - **Bootstrap nodes** baked into the DNS-seed list so a fresh client auto-connects.
 - **Staking** — safe, behavior-preserving optimizations; see
   [`staking-performance.md`](staking-performance.md).
+
+DoS hardening that came with the new peer-facing surface (headers handler) is
+documented in [`headers-first-sync.md`](headers-first-sync.md): connecting-headers-only
+gating of scrypt work, per-message caps, an `AskFor` queue cap, and a `mapOrphanBlocks`
+cap. A full pass over what else modern Bitcoin Core / the BIPs offer — imported vs.
+staged vs. out-of-scope — is in [`bitcoin-core-comparison.md`](bitcoin-core-comparison.md).
 
 ## 5. Thorough C++17 cleanup
 
