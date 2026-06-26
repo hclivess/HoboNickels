@@ -34,6 +34,7 @@ using namespace json_spirit;
 void ThreadRPCServer2(void* parg);
 
 static std::string strRPCUserColonPass;
+static std::string strRPCCookieAuth;
 
 const Object emptyobj;
 
@@ -505,6 +506,8 @@ bool HTTPAuthorized(map<string, string>& mapHeaders)
         return false;
     string strUserPass64 = strAuth.substr(6); boost::trim(strUserPass64);
     string strUserPass = DecodeBase64(strUserPass64);
+    if (!strRPCCookieAuth.empty() && TimingResistantEqual(strUserPass, strRPCCookieAuth))
+        return true;
     return TimingResistantEqual(strUserPass, strRPCUserColonPass);
 }
 
@@ -778,34 +781,81 @@ static void RPCAcceptHandler(boost::shared_ptr< basic_socket_acceptor<Protocol, 
     vnThreadsRunning[THREAD_RPCLISTENER]--;
 }
 
+// RPC auth cookie (Bitcoin Core style). A random secret is written to
+// <datadir>/.cookie as "__cookie__:<hex>" at startup, so local tools can
+// authenticate without a configured rpcpassword. It is recreated each start and
+// removed on shutdown. Remote callers can't read the file, so cookie-only access
+// stays as safe as the localhost-by-default RPC binding.
+static const char* const COOKIEAUTH_FILE = ".cookie";
+
+static boost::filesystem::path GetAuthCookieFile()
+{
+    return boost::filesystem::path(GetDataDir()) / COOKIEAUTH_FILE;
+}
+
+static bool GenerateAuthCookie()
+{
+    unsigned char rand_pwd[32];
+    RAND_bytes(rand_pwd, 32);
+    std::string cookie = std::string("__cookie__:") + HexStr(rand_pwd, rand_pwd + 32);
+
+    boost::filesystem::path filepath = GetAuthCookieFile();
+    boost::filesystem::ofstream file(filepath);
+    if (!file.is_open()) {
+        LogPrintf("Unable to open RPC cookie file %s for writing\n", filepath.string());
+        return false;
+    }
+    file << cookie;
+    file.close();
+    strRPCCookieAuth = cookie;
+    LogPrintf("Generated RPC authentication cookie %s\n", filepath.string());
+    return true;
+}
+
+void DeleteAuthCookie()
+{
+    try {
+        if (!strRPCCookieAuth.empty())
+            boost::filesystem::remove(GetAuthCookieFile());
+    } catch (const boost::filesystem::filesystem_error& e) {
+        LogPrintf("Unable to remove RPC cookie file: %s\n", e.what());
+    }
+}
+
+// Client side: read <datadir>/.cookie so the bundled client / CLI can authenticate
+// against a daemon that has no configured rpcpassword (cookie-only auth).
+static bool GetAuthCookie(std::string& cookieOut)
+{
+    boost::filesystem::ifstream file(GetAuthCookieFile());
+    if (!file.is_open())
+        return false;
+    std::getline(file, cookieOut);
+    file.close();
+    return !cookieOut.empty();
+}
+
 void ThreadRPCServer2(void* parg)
 {
     LogPrintf("ThreadRPCServer started\n");
 
-    strRPCUserColonPass = mapArgs["-rpcuser"] + ":" + mapArgs["-rpcpassword"];
-
-    if ((mapArgs["-rpcpassword"] == "") || (mapArgs["-rpcuser"] == mapArgs["-rpcpassword"]))
+    if (mapArgs["-rpcpassword"] == "")
     {
+        // No configured password: disable password auth by setting an unguessable
+        // value (so an empty "user:pass" can never match) and rely on the cookie.
         unsigned char rand_pwd[32];
         RAND_bytes(rand_pwd, 32);
-        string strWhatAmI = "To use hobonickelsd";
-        if (mapArgs.count("-server"))
-            strWhatAmI = strprintf(_("To use the %s option"), "\"-server\"");
-        else if (mapArgs.count("-daemon"))
-            strWhatAmI = strprintf(_("To use the %s option"), "\"-daemon\"");
+        strRPCUserColonPass = std::string("__nopassword__:") + HexStr(rand_pwd, rand_pwd + 32);
+    }
+    else
+        strRPCUserColonPass = mapArgs["-rpcuser"] + ":" + mapArgs["-rpcpassword"];
+
+    GenerateAuthCookie();
+
+    if (mapArgs["-rpcpassword"] != "" && mapArgs["-rpcuser"] == mapArgs["-rpcpassword"])
+    {
         uiInterface.ThreadSafeMessageBox(strprintf(
-            _("%s, you must set a rpcpassword in the configuration file:\n %s\n"
-              "It is recommended you use the following random password:\n"
-              "rpcuser=hobonickelsrpc\n"
-              "rpcpassword=%s\n"
-              "(you do not need to remember this password)\n"
-              "The username and password MUST NOT be the same.\n"
-              "If the file does not exist, create it with owner-readable-only file permissions.\n"
-              "It is also recommended to set alertnotify so you are notified of problems;\n"
-              "for example: alertnotify=echo %%s | mail -s \"HoboNickels Alert\" admin@foo.com\n"),
-                strWhatAmI,
-                GetConfigFile().string(),
-                EncodeBase58(&rand_pwd[0],&rand_pwd[0]+32)),
+            _("The rpcuser and rpcpassword in %s MUST NOT be the same.\n"),
+                GetConfigFile().string()),
             _("Error"), CClientUIInterface::MSG_ERROR);
         StartShutdown();
         return;
@@ -907,6 +957,7 @@ void ThreadRPCServer2(void* parg)
         io_service.run_one();
     vnThreadsRunning[THREAD_RPCLISTENER]++;
     StopRequests();
+    DeleteAuthCookie();
 }
 
 class JSONRequest
@@ -1131,10 +1182,16 @@ json_spirit::Value CRPCTable::execute(const std::string &strMethod, const json_s
 
 Object CallRPC(const string& strMethod, const Array& params)
 {
-    if (mapArgs["-rpcuser"] == "" && mapArgs["-rpcpassword"] == "")
+    // Build the credentials: a configured rpcpassword wins; otherwise fall back to
+    // the server's .cookie file (local cookie-only auth).
+    string strClientUserPass;
+    if (mapArgs["-rpcpassword"] != "")
+        strClientUserPass = mapArgs["-rpcuser"] + ":" + mapArgs["-rpcpassword"];
+    else if (!GetAuthCookie(strClientUserPass))
         throw runtime_error(strprintf(
             _("You must set rpcpassword=<password> in the configuration file:\n%s\n"
-              "If the file does not exist, create it with owner-readable-only file permissions."),
+              "If the file does not exist, create it with owner-readable-only file permissions.\n"
+              "(A local client can instead use the .cookie file the server writes in the data directory.)"),
                 GetConfigFile().string()));
 
     // Connect to localhost
@@ -1149,7 +1206,7 @@ Object CallRPC(const string& strMethod, const Array& params)
         throw runtime_error("couldn't connect to server");
 
     // HTTP basic authentication
-    string strUserPass64 = EncodeBase64(mapArgs["-rpcuser"] + ":" + mapArgs["-rpcpassword"]);
+    string strUserPass64 = EncodeBase64(strClientUserPass);
     map<string, string> mapRequestHeaders;
     mapRequestHeaders["Authorization"] = string("Basic ") + strUserPass64;
 

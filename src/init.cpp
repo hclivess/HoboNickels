@@ -90,6 +90,7 @@ void Shutdown(void* parg)
         StopNode();
         UnregisterNodeSignals(GetNodeSignals());
         bitdb.Flush(true);
+        DeleteAuthCookie();
         boost::filesystem::remove(GetPidFile());
         delete pWalletManager;
         TimerThread::StopTimer(); // for walletpassphrase unlock
