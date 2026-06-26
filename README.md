@@ -112,6 +112,14 @@ networking, GUI theme) are documented in
 - At-a-glance **peer, stake, and block** information.
 - Modern **Qt5 GUI**: high-DPI, light/dark/native themes (`-uitheme`).
 - **RPC console** in the GUI exposing the full command set.
+- **Self-compacting wallet** — `wallet.dat` is rewritten automatically so it never
+  bloats over time (`-walletcompact`, on by default; `compactwallet` RPC on demand).
+
+## Tools
+
+- **[`contrib/explorer/`](contrib/explorer/)** — a single-file, dependency-free
+  (Python 3 stdlib only) **block explorer**. Point it at a local node and browse
+  the chain in your browser: `python3 contrib/explorer/hbn_explorer.py`. Read-only.
 
 ## Documentation
 
