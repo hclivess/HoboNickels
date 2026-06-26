@@ -30,13 +30,35 @@ These are genuinely valuable and do **not** require a consensus fork, but each i
 substantial standalone effort that should be implemented and **tested on the live
 network by the chain owner** one at a time, not batched. Ordered by value/effort.
 
-### 1. UTXO/coins cache for connection (high value, large, consensus-adjacent)
+> **The residual IBD bottleneck is disk I/O, not CPU.** A syncing node sits at ~7% CPU,
+> so it is wait-bound. After the 2.0.11 download fixes remove the network gating, the
+> remaining cost is synchronous random-read disk I/O in `ConnectBlock → FetchInputs`:
+> per input, a random `ReadTxIndex` LevelDB lookup **plus** a `ReadFromDisk` block-file
+> seek (a fresh `fopen`/seek/read, no descriptor cache), plus a per-tx `ReadTxIndex` for
+> double-spend detection — all serialized under `cs_main` on one thread. Items 1–3 below
+> target exactly this and are the highest-value next work.
+
+### 1. Block-file descriptor cache (high value, **small**, non-consensus)
+`ReadFromDisk` opens (`fopen`) and closes a `blkNNNN.dat` for **every input read** with
+no persistent handle. An LRU of open file descriptors eliminates the per-input
+`open`/`close` syscall pair on the hottest IBD path. Small, self-contained, pure I/O
+win, zero consensus risk. *Cheapest meaningful sync speedup left.*
+
+### 2. Input read-ahead / prefetch (high value, medium, non-consensus)
+The connect path is strictly read-then-compute serial: one random seek at a time, with
+the disk idle while the CPU works and vice-versa. Prefetching the next queued block's
+inputs (or batching `ReadTxIndex` lookups) gives the disk multiple outstanding requests
+and overlaps I/O with compute — which is what actually lifts CPU above ~7% on the
+validation side. *Raise `-dbcache` further (512 MB) for large chains alongside this.*
+
+### 3. UTXO/coins cache for connection (high value, large, consensus-adjacent)
 Modern Core validates against an in-memory coins view (`CCoinsViewCache`) flushed
-periodically, instead of per-input `ReadTxIndex`/`txindex` LevelDB lookups. This is the
-**#2 IBD win** after multi-peer download. It is non-consensus (same validation result)
-but touches the hottest validation path, so it must be byte-for-byte equivalent and
-diffed against the current binary across a full resync before trust. *Risk: a wrong
-cache = silent consensus divergence. Must be staged with live diffing.*
+periodically, instead of per-input `ReadTxIndex`/`txindex` LevelDB lookups — removing
+most of the random reads above entirely. The bigger, structural version of items 1–2.
+It is non-consensus (same validation result) but touches the hottest validation path, so
+it must be byte-for-byte equivalent and diffed against the current binary across a full
+resync before trust. *Risk: a wrong cache = silent consensus divergence. Must be staged
+with live diffing.*
 
 ### 2. Deterministic HD wallet — BIP32 + BIP39 + BIP44 (high value, large, format change)
 Today's wallet is a random keypool (`wallet.dat` BDB). BIP32 hierarchical keys from a

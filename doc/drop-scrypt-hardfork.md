@@ -1,82 +1,64 @@
-# Proposal: replace the scrypt block hash with SHA256d (hard fork)
+# Note: would dropping the scrypt block hash speed up sync? (No.)
 
-> **Status: proposal / discussion only.** This is *not* implemented and must not be
-> without a coordinated network upgrade. It is a hard fork.
+> **Status: analysis. The answer is no — this is here to correct an earlier claim.**
+> An earlier draft of this document argued for a hard fork to replace the scrypt block
+> hash with SHA256d *on sync-speed grounds*. That argument was wrong and is retracted
+> below. A scrypt-removal hard fork is **not** justified by sync performance.
 
-## Motivation
+## Why the sync-speed argument was wrong
 
-HoboNickels' block hash (`CBlock::GetHash`) is **scrypt** (`scrypt_blockhash`,
-N=1024, ~128 KB scratchpad) — a *memory-hard* hash designed to be slow. On this
-chain it is the single hottest hash: **every block and (with headers-first sync)
-every header** is scrypt-hashed. During the initial block download that is millions
-of memory-hard hashes, and it is the dominant CPU cost once script checks are skipped
-below the checkpoint.
+The premise was "scrypt is the dominant CPU cost of sync." It is not:
 
-HoboNickels is, in practice, **proof-of-stake only** — the proof-of-work miner is not
-even wired up (no `generate`/`setgenerate`), so the *reason* scrypt was chosen (ASIC-
-resistant CPU/GPU PoW mining) no longer applies. Replacing scrypt with **SHA256d**
-(double SHA-256) for the block hash would make block hashing roughly two orders of
-magnitude faster, directly and substantially speeding up sync and lowering CPU use.
+- **scrypt is memoized.** `CBlock::GetHash()` caches its result (`main.h`), so each
+  block is scrypt-hashed **once** during IBD no matter how many call sites ask for its
+  hash. It is ~1 hash per block, not "several" or "millions."
+- **scrypt is cheap in aggregate.** A single scrypt(N=1024, r=1, p=1) is well under a
+  millisecond. Across an entire chain that totals on the order of **minutes** of CPU —
+  a negligible slice of an hours-long initial sync.
+- **A syncing node is not CPU-bound.** Observed CPU during IBD is on the order of **~7%
+  of one core** — i.e. the node is ~93% *idle*, blocked on waits. A pure-CPU workload
+  (like scrypt) categorically cannot be the bottleneck of a node that is mostly idle;
+  if it were, you'd see a pegged core. Removing scrypt would reclaim those few minutes
+  and **not move the IBD wall-clock**.
 
-## Why this is a hard fork (and not a trivial swap)
+The only true statement in the original framing is a near-tautology: *below* the
+checkpoint, where ECDSA script verification is skipped (`main.cpp`, `fScriptChecks`
+gate), scrypt is the largest slice of the *residual* CPU — but that residual is ~7% of
+a core, so being its biggest slice is irrelevant to wall-clock.
 
-The block hash is not cosmetic — it is consensus-critical in three ways:
+## Where IBD time actually goes
 
-1. **Block identity & chain linking.** Every block is keyed by its hash and links to
-   its parent by hash. Changing the function changes all post-fork block hashes.
-2. **Proof-of-work check.** PoW blocks are validated against the target using this
-   hash. (Dead in practice on HBN, but still in the rules.)
-3. **Stake-modifier entropy — the important one.** `GetStakeEntropyBit` derives a bit
-   from `GetHash()` (the block hash), which feeds `ComputeNextStakeModifier`. The
-   stake modifier is **consensus** and drives the PoS kernel. So changing the block
-   hash changes the stake modifier from the fork height onward — a real consensus
-   change to the proof-of-stake path, not just a label swap.
+Sync is **wait-bound**, not compute-bound. Two waits dominate:
 
-Because old nodes compute scrypt and would reject SHA256d-hashed blocks (and would
-compute a different stake modifier), every node must upgrade. That is the definition
-of a hard fork.
+1. **Network round-trips / download serialization.** The legacy `getblocks → inv →
+   getdata` driver pulls ~500 blocks from a *single* peer and only requests the next
+   batch after the previous one is delivered, so the node idles a full round-trip every
+   500 blocks. This is what headers-first + multi-peer parallel download (default on as
+   of 2.0.11) target.
+2. **Synchronous random-read disk I/O during validation.** `ConnectBlock → FetchInputs`
+   does, per input, a random `ReadTxIndex` LevelDB lookup **plus** a `ReadFromDisk` into
+   an old `blkNNNN.dat` (a fresh `fopen`/seek/read with no descriptor cache), plus an
+   extra per-tx `ReadTxIndex` for the double-spend check. On a spinning disk that's
+   dozens of random seeks per block, serialized under `cs_main` on one thread. `-dbcache`
+   helps the LevelDB half only; the block-file seeks are untouched. This is the residual
+   bottleneck after the download fixes.
 
-## Sketch of the change
+Neither is scrypt. See `bitcoin-core-comparison.md` and `headers-first-sync.md` for the
+work that targets these.
 
-- Pick an **activation height** `H` well in the future. Below `H`, `GetHash` stays
-  scrypt (preserving all historical hashes and the existing chain); at and above `H`,
-  `GetHash` is SHA256d.
-- `CBlock::GetHash()` becomes height-dependent — but blocks don't know their height
-  in isolation, so in practice this is gated on **block time** (like the existing
-  `VERSION1_5_SWITCH_TIME` switches) rather than height, or the hash is computed
-  against the connecting tip's height.
-- Historical blocks keep their scrypt hashes; `mapBlockIndex` ends up with a mix
-  (scrypt below the switch, SHA256d above). `hashPrevBlock` of the first post-switch
-  block is the scrypt hash of the last pre-switch block — the chain stays linked.
-- `GetStakeEntropyBit` and any other `GetHash`-derived consensus value automatically
-  follow the new hash above the switch; this must be reviewed block-for-block.
+## What about dropping scrypt for *other* reasons?
 
-## Tradeoffs
+If someone wants to drop scrypt for non-performance reasons (it's a memory-hard PoW hash
+with no active mining on this PoS-only chain), note that it is **not** a cosmetic swap —
+it is a genuine consensus change and a hard fork:
 
-**Pros**
-- ~100× faster block/header hashing → much faster IBD and lower steady-state CPU.
-- Removes the main remaining sync-CPU bottleneck that the non-fork optimizations
-  (headers-first, multi-peer download, hash memoization) can only partially hide.
-- Drops a memory-hard function whose original purpose (PoW mining) is unused.
+- **Block identity & chain linking** change for every post-fork block.
+- **Stake-modifier entropy.** `GetStakeEntropyBit` derives a bit from `GetHash()`, which
+  feeds `ComputeNextStakeModifier`. The stake modifier is consensus and drives the PoS
+  kernel, so changing the block hash changes the modifier from the fork height onward.
+- It would require a coordinated upgrade (activation height/time) by every node,
+  exchange, pool, and explorer, with a long runway and split risk.
 
-**Cons / risks**
-- **Hard fork:** requires a coordinated upgrade by exchanges, pools, explorers, and
-  wallet users before `H`. Un-upgraded nodes split onto a dead chain.
-- Touches the **stake-modifier** computation — needs careful, well-tested,
-  byte-reviewed implementation and a long activation runway.
-- Loses scrypt PoW entirely (acceptable only because PoW is already inactive).
-- A new switch point is one more piece of permanent consensus complexity.
-
-## Recommendation
-
-Worth doing **only** with real community coordination and a long activation runway,
-because the upside (sync speed) is large but the cost (a stake-modifier-touching hard
-fork) is real. Until/unless that happens, the **non-fork** path already shipped is the
-pragmatic answer: headers-first + multi-peer parallel download (cut the wall-clock),
-`GetHash` memoization + connecting-headers skip (hash each block/header once, and
-never hash junk), and `-O3` on the scrypt TU. Those don't make scrypt cheap, but they
-remove most of the redundant scrypt work without forking the chain.
-
-If the community does want to pursue this, the safe sequence is: implement behind a
-far-future time switch on testnet, diff stake modifiers and block acceptance against
-the current binary across the switch, and only then schedule mainnet activation.
+That is a lot of consensus risk for **zero** sync-speed benefit. **Recommendation: do
+not pursue it as a performance measure.** Redirect that effort to the I/O and pipeline
+fixes, which are non-consensus and actually move the wall-clock.
