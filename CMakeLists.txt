@@ -181,6 +181,12 @@ set(CORE_SOURCES
     src/json/json_spirit_value.cpp
     src/json/json_spirit_writer.cpp)
 
+# scrypt is the memory-hard block-hash core and the hottest hash on this chain
+# (every block AND header is hashed with it). Compile it at -O3 specifically -- safe
+# because it is pure integer code (no floating point, so no determinism risk), and
+# the output stays byte-identical.
+set_source_files_properties(src/scrypt.cpp PROPERTIES COMPILE_OPTIONS "-O3")
+
 set(COMMON_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/json

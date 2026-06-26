@@ -30,8 +30,9 @@ static leveldb::Options GetOptions() {
     leveldb::Options options;
     // -dbcache is the LevelDB read (block) cache, in MB. The old default of
     // 25 MB is tiny on modern machines; a larger cache cuts disk reads during
-    // the initial block download.
-    int nCacheSizeMB = GetArg("-dbcache", 64);
+    // the initial block download. Bumped to 256 (the per-input ReadTxIndex access
+    // pattern makes the cache unusually impactful for IBD); lower it on small boxes.
+    int nCacheSizeMB = GetArg("-dbcache", 256);
     size_t nCacheBytes = (size_t)nCacheSizeMB * 1048576;
     options.block_cache = leveldb::NewLRUCache(nCacheBytes);
     // A bigger write buffer means fewer memtable flushes / compactions while

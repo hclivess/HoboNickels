@@ -422,6 +422,39 @@ unsigned int LimitOrphanTxSize(unsigned int nMaxOrphans)
     return nEvicted;
 }
 
+// Bound the orphan-block buffer. mapOrphanBlocks held full heap CBlock copies with
+// no eviction; multi-peer out-of-order download makes orphan accumulation routine,
+// so cap it (evicting random orphans) like the orphan-tx buffer. Non-consensus.
+static const unsigned int MAX_ORPHAN_BLOCKS = 750;
+
+unsigned int LimitOrphanBlocks(unsigned int nMaxOrphans)
+{
+    unsigned int nEvicted = 0;
+    while (mapOrphanBlocks.size() > nMaxOrphans)
+    {
+        uint256 randomhash = GetRandHash();
+        map<uint256, CBlock*>::iterator it = mapOrphanBlocks.lower_bound(randomhash);
+        if (it == mapOrphanBlocks.end())
+            it = mapOrphanBlocks.begin();
+        CBlock* pevict = it->second;
+        // Remove it from the by-prev multimap (find the matching pointer in the range).
+        for (multimap<uint256, CBlock*>::iterator mi = mapOrphanBlocksByPrev.lower_bound(pevict->hashPrevBlock);
+             mi != mapOrphanBlocksByPrev.upper_bound(pevict->hashPrevBlock); )
+        {
+            if (mi->second == pevict)
+                mapOrphanBlocksByPrev.erase(mi++);
+            else
+                ++mi;
+        }
+        if (pevict->IsProofOfStake())
+            setStakeSeenOrphan.erase(pevict->GetProofOfStake());
+        mapOrphanBlocks.erase(it);
+        delete pevict;
+        ++nEvicted;
+    }
+    return nEvicted;
+}
+
 
 
 
@@ -2740,6 +2773,7 @@ bool ProcessBlock(CNode* pfrom, CBlock* pblock)
         CBlock* pblock2 = new CBlock(*pblock);
         mapOrphanBlocks.insert(make_pair(hash, pblock2));
         mapOrphanBlocksByPrev.insert(make_pair(pblock2->hashPrevBlock, pblock2));
+        LimitOrphanBlocks(MAX_ORPHAN_BLOCKS);
 
         // Ask this guy to fill in what we're missing
         if (pfrom)
