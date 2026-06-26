@@ -4224,6 +4224,49 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
 
 
 
+    else if (strCommand == "getsnapshot")
+    {
+        // Instant-sync source: serve our chain-snapshot manifest if we have one.
+        boost::filesystem::path mfp = GetSnapshotDir() / "manifest.txt";
+        std::string strManifest;
+        if (boost::filesystem::exists(mfp))
+        {
+            boost::filesystem::ifstream f(mfp);
+            std::stringstream ss; ss << f.rdbuf();
+            strManifest = ss.str();
+        }
+        pfrom->PushMessage("snapshot", strManifest);
+    }
+
+
+    else if (strCommand == "getsnapchunk")
+    {
+        std::string strFile; int nOffset = 0, nLen = 0;
+        vRecv >> strFile >> nOffset >> nLen;
+        std::vector<unsigned char> data;
+        // Serve only plain names inside the snapshot dir (no path traversal), bounded size.
+        bool fSafe = !strFile.empty() && strFile.find("..") == std::string::npos &&
+                     strFile[0] != '/' && nOffset >= 0 && nLen > 0 && nLen <= 1000000 &&
+                     (strFile.compare(0, 3, "blk") == 0 || strFile.compare(0, 10, "txleveldb/") == 0);
+        if (fSafe)
+        {
+            boost::filesystem::path p = GetSnapshotDir() / strFile;
+            FILE* f = fopen(p.string().c_str(), "rb");
+            if (f)
+            {
+                if (fseek(f, nOffset, SEEK_SET) == 0)
+                {
+                    data.resize(nLen);
+                    int n = fread(&data[0], 1, nLen, f);
+                    data.resize(n > 0 ? n : 0);
+                }
+                fclose(f);
+            }
+        }
+        pfrom->PushMessage("snapchunk", strFile, nOffset, data);
+    }
+
+
     else if (strCommand == "mempool")
     {
         std::vector<uint256> vtxid;
