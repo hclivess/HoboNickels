@@ -104,7 +104,11 @@ static std::deque<uint256> g_vBlocksToDownload;            // queued, not yet re
 static std::set<uint256> g_setBlocksQueuedOrInFlight;     // dedup membership (queued ∪ in-flight)
 static std::map<uint256, std::pair<NodeId, int64_t> > g_mapBlocksInFlight; // hash -> (peer id, request time s)
 static const size_t MAX_BLOCKS_IN_FLIGHT_PER_PEER = 16;
-static const int64_t BLOCK_DOWNLOAD_TIMEOUT = 120;        // seconds before re-assigning
+static const int64_t BLOCK_DOWNLOAD_TIMEOUT = 30;         // seconds before fully re-assigning a stuck request
+static const int64_t BLOCK_STALL_TIMEOUT = 10;            // seconds before *redundantly* re-requesting the oldest
+                                                          // outstanding block from a second peer once the queue
+                                                          // has drained -- breaks a tip wedged on one slow peer
+                                                          // (the #1 cause of idle-CPU, crawling sync)
 
 unsigned int GetTargetSpacing()
 {
@@ -4487,7 +4491,7 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
         if (GetBoolArg("-headersfirst", true) && pto->fSuccessfullyConnected && !pto->fDisconnect)
         {
             int64_t nNowSec = GetTime();
-            // Re-queue blocks whose download timed out (slow or disconnected peer).
+            // Re-queue blocks whose download fully timed out (slow or disconnected peer).
             for (std::map<uint256, std::pair<NodeId, int64_t> >::iterator it = g_mapBlocksInFlight.begin();
                  it != g_mapBlocksInFlight.end(); )
             {
@@ -4522,8 +4526,57 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
                 g_mapBlocksInFlight[h] = std::make_pair(pto->GetId(), nNowSec);
                 ++nInFlight;
             }
+            // Stall-breaker. If the queue has drained but this peer still has spare
+            // window, the tip is probably wedged on a block assigned to a slow peer:
+            // everything past it arrives and piles up as orphans, the tip can't
+            // advance, and the header look-ahead (gated on tip progress) never refills
+            // the queue -- so every other peer goes idle while one laggard holds the
+            // critical block for the full timeout. Redundantly re-request the OLDEST
+            // outstanding block (the likely wedge) from THIS peer so a fast peer can
+            // satisfy it now. We hand ownership (and a fresh clock) to this peer; if
+            // the original also delivers, ProcessBlock just drops the duplicate.
+            if (nInFlight < MAX_BLOCKS_IN_FLIGHT_PER_PEER && g_vBlocksToDownload.empty() &&
+                !g_mapBlocksInFlight.empty())
+            {
+                uint256 hOldest;
+                int64_t nOldest = nNowSec;
+                bool fFound = false;
+                for (std::map<uint256, std::pair<NodeId, int64_t> >::const_iterator it = g_mapBlocksInFlight.begin();
+                     it != g_mapBlocksInFlight.end(); ++it)
+                {
+                    if (it->second.first != pto->GetId() &&
+                        nNowSec - it->second.second > BLOCK_STALL_TIMEOUT &&
+                        it->second.second < nOldest)
+                    {
+                        nOldest = it->second.second;
+                        hOldest = it->first;
+                        fFound = true;
+                    }
+                }
+                if (fFound && !mapBlockIndex.count(hOldest) && !mapOrphanBlocks.count(hOldest))
+                {
+                    vGetBlocks.push_back(CInv(MSG_BLOCK, hOldest));
+                    g_mapBlocksInFlight[hOldest] = std::make_pair(pto->GetId(), nNowSec);
+                }
+            }
             if (!vGetBlocks.empty())
                 pto->PushMessage("getdata", vGetBlocks);
+
+            // Optional ground-truth instrumentation: shows whether the pipeline is
+            // full (download-bound) or starving (in-flight ~0, orphans piling up).
+            if (GetBoolArg("-debugsync", false))
+            {
+                static int64_t nLastSyncLog = 0;
+                if (nNowSec - nLastSyncLog >= 5)
+                {
+                    nLastSyncLog = nNowSec;
+                    LogPrintf("sync: height=%d inflight=%u queued=%u orphans=%u\n",
+                              pindexBest ? pindexBest->nHeight : 0,
+                              (unsigned)g_mapBlocksInFlight.size(),
+                              (unsigned)g_vBlocksToDownload.size(),
+                              (unsigned)mapOrphanBlocks.size());
+                }
+            }
         }
 
         //
