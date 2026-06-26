@@ -56,9 +56,17 @@ built from source (static) via CMake FetchContent.
   `PROTOCOL_VERSION` change, peers don't need to upgrade. See
   [`headers-first-sync.md`](headers-first-sync.md).
 - **Multi-peer parallel block download** — the in-flight window is spread across all
-  connected peers with per-block accounting (no duplicate fetches) and a timeout
-  re-queue, instead of serializing the download on a single peer. This targets the
-  primary IBD bottleneck (see "where the time goes" below).
+  connected peers with per-block accounting and a timeout re-queue, instead of
+  serializing the download on a single peer. This targets the primary IBD bottleneck
+  (see "where the time goes" below).
+- **Slow-peer stall-breaker** — if the next-needed block is assigned to a slow/
+  withholding peer, later blocks pile up as orphans, the tip can't advance, and the
+  header look-ahead (gated on tip progress) dries up — so every other peer idles for
+  the full timeout. Confirmed by running the daemon live (idle CPU + idle disk + slow).
+  Fixed by redundantly re-requesting the oldest outstanding block from a second peer
+  once the queue drains, and cutting the download timeout 120s → 30s. The default-on
+  `-debugsync` line (`sync: height/inflight/queued/orphans`) makes pipeline state
+  visible while syncing.
 - **scrypt** — `GetHash` is memoized (each block/header is hashed once), non-connecting
   junk headers are dropped *before* any scrypt work, and the scrypt TU is compiled at
   `-O3`. These are cheap, harmless wins, but to be clear: **scrypt is not the sync
@@ -77,14 +85,16 @@ built from source (static) via CMake FetchContent.
   [`staking-performance.md`](staking-performance.md).
 
 **Where the time actually goes.** IBD is *wait-bound*, not compute-bound — hence the
-~7% CPU. Two waits dominate: (1) network round-trips in the legacy single-peer
-`getblocks` driver (a full round-trip of idle every 500 blocks) — addressed by
-headers-first + multi-peer download above; and (2) synchronous **random-read disk I/O**
-in block validation: `ConnectBlock → FetchInputs` does a random `ReadTxIndex` LevelDB
-lookup *plus* a `ReadFromDisk` block-file seek (a fresh `fopen` per input, no descriptor
-cache) for every input, serialized under `cs_main` on one thread. `-dbcache` covers the
-LevelDB half only; the block-file seeks remain. That disk path is the **residual**
-bottleneck and the next target (a block-file descriptor cache + input read-ahead) — see
+~7% CPU. It is **never scrypt** (memoized to ~1 hash/block). Which wait dominates depends
+on hardware: (1) **the download pipeline** — network round-trips, and the slow-peer tip
+stall described above (the dominant cost on fast disks, where validation is cheap;
+addressed by headers-first + multi-peer + the stall-breaker); and (2) **random-read disk
+I/O** in block validation — `ConnectBlock → FetchInputs` does a random `ReadTxIndex`
+LevelDB lookup *plus* a `ReadFromDisk` block-file seek (a fresh `fopen` per input, no
+descriptor cache) for every input, serialized under `cs_main`. On a spinning HDD that
+disk path dominates; on NVMe/SSD it's cheap and the pipeline is the wall. `-dbcache`
+covers the LevelDB half only. The remaining disk-side targets (block-file descriptor
+cache + input read-ahead) are staged in
 [`bitcoin-core-comparison.md`](bitcoin-core-comparison.md).
 
 DoS hardening that came with the new peer-facing surface (headers handler) is
