@@ -61,7 +61,7 @@ built from source (static) via CMake FetchContent.
   on a fast CPU.
 - **scrypt cost reduction** — `GetHash` is memoized (each block/header is hashed once),
   non-connecting junk headers are dropped *before* any scrypt work, and the scrypt TU
-  is compiled at `-O3`. See [`proposals/drop-scrypt-hardfork.md`](proposals/drop-scrypt-hardfork.md)
+  is compiled at `-O3`. See [`drop-scrypt-hardfork.md`](drop-scrypt-hardfork.md)
   for the larger (fork-requiring) option of dropping scrypt entirely.
 - **Dynamic checkpointing** — signatures are re-verified only for the most recent
   `-checkpointdepth` blocks (default 500); older history is trusted. The

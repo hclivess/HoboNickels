@@ -77,6 +77,6 @@ on a PoS chain "regtest" needs a stake-friendly variant.
 
 ## Explicitly out of scope (consensus / would fork the chain)
 SegWit, Taproot, bech32/bech32m addresses, RBF, `assumevalid` validity-skipping, any
-change to the scrypt block hash (see `proposals/drop-scrypt-hardfork.md` — that one *is*
+change to the scrypt block hash (see `drop-scrypt-hardfork.md` — that one *is*
 a fork, documented as a proposal), the PoS kernel, the stake modifier, or the money
 supply / reward schedule.
