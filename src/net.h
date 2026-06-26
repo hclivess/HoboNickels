@@ -273,6 +273,8 @@ public:
     uint256 hashContinue;
     CBlockIndex* pindexLastGetBlocksBegin;
     uint256 hashLastGetBlocksEnd;
+    CBlockIndex* pindexLastGetHeadersBegin;
+    uint256 hashLastGetHeadersEnd;
     int nStartingHeight;
     bool fStartSync;
 
@@ -326,6 +328,8 @@ public:
         hashContinue = 0;
         pindexLastGetBlocksBegin = 0;
         hashLastGetBlocksEnd = 0;
+        pindexLastGetHeadersBegin = 0;
+        hashLastGetHeadersEnd = 0;
         nStartingHeight = -1;
         fStartSync = false;
         fGetAddr = false;
@@ -730,6 +734,7 @@ public:
 
 
     void PushGetBlocks(CBlockIndex* pindexBegin, uint256 hashEnd);
+    void PushGetHeaders(CBlockIndex* pindexBegin, uint256 hashEnd);
     bool IsSubscribed(unsigned int nChannel);
     void Subscribe(unsigned int nChannel, unsigned int nHops=0);
     void CancelSubscribe(unsigned int nChannel);

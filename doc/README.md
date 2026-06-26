@@ -13,6 +13,9 @@
   must never omit mempool transactions), and the consensus off-limits zone.
 - **[performance.md](performance.md)** — daemon sync/validation/memory
   optimizations: what's applied, the deferred roadmap, and the off-limits zone.
+- **[headers-first-sync.md](headers-first-sync.md)** — headers-first block download
+  (`-headersfirst`, default on): how it works, why it's wire-compatible, the PoS
+  wrinkle, and the test checklist.
 - **[gui.md](gui.md)** — the Qt5 wallet: modernized look-and-feel (high-DPI,
   Fusion style, light/dark themes via `-uitheme`), the RPC console, and staking.
 
