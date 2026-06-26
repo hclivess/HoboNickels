@@ -1967,23 +1967,25 @@ bool CBlock::ConnectBlock(CTxDB& txdb, CBlockIndex* pindex, bool fJustCheck)
     // Now that the whole chain is irreversibly beyond that time it is applied to all blocks except the
     // two in the chain that violate it. This prevents exploiting the issue against nodes in their
     // initial block download.
-    // Dynamic checkpoint: only re-verify signatures for blocks near the chain
-    // tip; everything more than -checkpointdepth blocks below the best known
-    // height is trusted (its scripts are not re-checked). This greatly speeds up
-    // the initial block download, where signature verification dominates.
     //
-    // Safety: the hardcoded checkpoint height is a hard floor (older blocks are
-    // always trusted), and the checkpoint *hashes* still anchor the chain in
-    // CheckBlock, so a substituted history below the last checkpoint is rejected
-    // outright. "Best known height" uses the median of peers' reported heights,
-    // so pushing it up requires a majority of your peers to lie. Set
-    // -checkpointdepth=0 to re-verify every block.
-    int nCheckpointDepth = GetArg("-checkpointdepth", 500);
-    if (nCheckpointDepth < 0)
-        nCheckpointDepth = 0;
-    int nBestKnownHeight = std::max(nBestHeight, GetNumBlocksOfPeers());
-    int nVerifyFromHeight = std::max((int)Checkpoints::GetTotalBlocksEstimate(),
-                                     nBestKnownHeight - nCheckpointDepth);
+    // Normal sync FULLY validates by default: every block above the last hardcoded
+    // checkpoint has its signatures re-checked (blocks below it are trusted -- their
+    // hashes are immutably anchored by the checkpoints, so re-checking them is
+    // pointless). Now that instant snap-sync (the checkpoint-trusted fast path) is the
+    // default for fresh nodes, ordinary sync is the trustless option, so it no longer
+    // skips signatures.
+    //
+    // -checkpointdepth=N (N>0) opts back into the faster "only re-verify the most recent
+    // N blocks" mode for a normal sync without snap-sync. Safety either way: the
+    // hardcoded checkpoint hashes anchor the chain in CheckBlock, so substituted history
+    // below the last checkpoint is rejected outright.
+    int nCheckpointDepth = GetArg("-checkpointdepth", 0);   // 0 = verify all above the last checkpoint
+    int nVerifyFromHeight = (int)Checkpoints::GetTotalBlocksEstimate();
+    if (nCheckpointDepth > 0)
+    {
+        int nBestKnownHeight = std::max(nBestHeight, GetNumBlocksOfPeers());
+        nVerifyFromHeight = std::max(nVerifyFromHeight, nBestKnownHeight - nCheckpointDepth);
+    }
     bool fScriptChecks = pindex->nHeight >= nVerifyFromHeight;
 
     //// issue here: it doesn't know the version

@@ -252,7 +252,7 @@ std::string HelpMessage()
         strUsage += "  -pid=<file>            " + _("Specify pid file (default: HoboNickelsd.pid)") + "\n";
         strUsage += "  -datadir=<dir>         " + _("Specify data directory") + "\n";
         strUsage += "  -dbcache=<n>           " + _("Set database cache size in megabytes (default: 256)") + "\n";
-        strUsage += "  -checkpointdepth=<n>   " + _("Only verify signatures for the most recent <n> blocks; trust older ones (default: 500, 0 = verify all)") + "\n";
+        strUsage += "  -checkpointdepth=<n>   " + _("Re-verify signatures only for the most recent <n> blocks (faster); 0 (default) verifies every block above the last hardcoded checkpoint") + "\n";
         strUsage += "  -dblogsize=<n>         " + _("Set database disk log size in megabytes (default: 100)") + "\n";
         strUsage += "  -timeout=<n>           " + _("Specify connection timeout in milliseconds (default: 5000)") + "\n";
         strUsage += "  -proxy=<ip:port>       " + _("Connect through socks proxy") + "\n";
@@ -339,6 +339,7 @@ std::string HelpMessage()
         strUsage += "  -salvagewallet         " + _("Attempt to recover private keys from a corrupt wallet.dat") + "\n";
         strUsage += "  -checkblocks=<n>       " + _("How many blocks to check at startup (default: 250, 0 = all)") + "\n";
         strUsage += "  -headersfirst          " + _("Sync using headers-first block download (default: 1; set 0 for the legacy inv-based sync)") + "\n";
+        strUsage += "  -snapsync              " + _("On a fresh node, fetch a checkpoint-verified chain snapshot from a peer for instant sync (default: 1; set 0 to fully sync from genesis)") + "\n";
         strUsage += "  -debugsync             " + _("Log block-download pipeline stats (in-flight/queued/orphans) every 5s while syncing (default: 1; set 0 to disable)") + "\n";
         strUsage += "  -checklevel=<n>        " + _("How thorough the block verification is (0-6, default: 1)") + "\n";
         strUsage += "  -par=N                 " + _("Set the number of script verification threads (1-16, 0=auto, default: 0)") + "\n";
