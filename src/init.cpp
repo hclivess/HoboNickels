@@ -326,7 +326,7 @@ std::string HelpMessage()
         strUsage += "  -salvagewallet         " + _("Attempt to recover private keys from a corrupt wallet.dat") + "\n";
         strUsage += "  -checkblocks=<n>       " + _("How many blocks to check at startup (default: 250, 0 = all)") + "\n";
         strUsage += "  -headersfirst          " + _("Sync using headers-first block download (default: 1; set 0 for the legacy inv-based sync)") + "\n";
-        strUsage += "  -debugsync             " + _("Log block-download pipeline stats (in-flight/queued/orphans) every 5s to debug.log") + "\n";
+        strUsage += "  -debugsync             " + _("Log block-download pipeline stats (in-flight/queued/orphans) every 5s while syncing (default: 1; set 0 to disable)") + "\n";
         strUsage += "  -checklevel=<n>        " + _("How thorough the block verification is (0-6, default: 1)") + "\n";
         strUsage += "  -par=N                 " + _("Set the number of script verification threads (1-16, 0=auto, default: 0)") + "\n";
         strUsage += "  -loadblock=<file>      " + _("Imports blocks from external blk000?.dat file") + "\n";

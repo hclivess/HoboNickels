@@ -4562,9 +4562,13 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
             if (!vGetBlocks.empty())
                 pto->PushMessage("getdata", vGetBlocks);
 
-            // Optional ground-truth instrumentation: shows whether the pipeline is
-            // full (download-bound) or starving (in-flight ~0, orphans piling up).
-            if (GetBoolArg("-debugsync", false))
+            // Ground-truth instrumentation: shows whether the pipeline is full
+            // (download-bound) or starving (in-flight ~0, orphans piling up). On by
+            // default, but only while a download is actually in progress, so it
+            // reports sync health during IBD and goes quiet once caught up. Set
+            // -debugsync=0 to silence it entirely.
+            if (GetBoolArg("-debugsync", true) &&
+                (!g_mapBlocksInFlight.empty() || !g_vBlocksToDownload.empty()))
             {
                 static int64_t nLastSyncLog = 0;
                 if (nNowSec - nLastSyncLog >= 5)
