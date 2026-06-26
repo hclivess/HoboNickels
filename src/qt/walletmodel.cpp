@@ -437,6 +437,14 @@ void WalletModel::setStakeForCharity(bool fStakeForCharity, int& nStakeForCharit
         wallet->nStakeForCharityMin = nStakeForCharityMinAmout;
         wallet->nStakeForCharityMax = nStakeForCharityMaxAmount;
     }
+
+    // Arm the global trigger that ProcessBlock checks (main.cpp) -- without this,
+    // enabling S4C from the GUI set only the per-wallet flag and never actually paid
+    // out until a restart reloaded it from walletdb. The RPC path already did this.
+    // (Disable is handled by the CWalletManager::StakeForCharity sweep, which clears
+    // the global flag once no wallet is running S4C.)
+    if (fStakeForCharity)
+        fGlobalStakeForCharity = true;
 }
 
 void  WalletModel::getStakeForCharity(int& nStakeForCharityPercent,
