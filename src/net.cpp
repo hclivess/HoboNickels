@@ -108,6 +108,18 @@ void CNode::PushGetBlocks(CBlockIndex* pindexBegin, uint256 hashEnd)
     PushMessage("getblocks", CBlockLocator(pindexBegin), hashEnd);
 }
 
+void CNode::PushGetHeaders(CBlockIndex* pindexBegin, uint256 hashEnd)
+{
+    // Headers-first sync driver. Filter out duplicate requests so a tip that
+    // hasn't advanced doesn't re-request the same header range.
+    if (pindexBegin == pindexLastGetHeadersBegin && hashEnd == hashLastGetHeadersEnd)
+        return;
+    pindexLastGetHeadersBegin = pindexBegin;
+    hashLastGetHeadersEnd = hashEnd;
+
+    PushMessage("getheaders", CBlockLocator(pindexBegin), hashEnd);
+}
+
 // find 'best' local address for a particular peer
 bool GetLocal(CService& addr, const CNetAddr *paddrPeer)
 {

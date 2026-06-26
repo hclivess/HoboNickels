@@ -89,6 +89,11 @@ int64_t nSplitThreshold = 25 * COIN;   // only split a stake output above 25 HBN
 int64_t nCombineThreshold = 50 * COIN; // fold same-address dust until 50 HBN accrued
 extern enum Checkpoints::CPMode CheckpointsMode;
 
+// Headers-first sync: height of our tip at the last `getheaders` request, so we
+// pull the next header batch only after we've made real download progress (a
+// rolling look-ahead) instead of once per connected block.
+static int g_nLastHeadersRequestHeight = -1;
+
 unsigned int GetTargetSpacing()
 {
    unsigned int nStakeTargetSpacingSwitch = (fTestNet ? 1 * 60 : 1 * 30); // block spacing, 1 min tesnet, 30 seconds Main (OLD)
@@ -3776,6 +3781,36 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
     }
 
 
+    else if (strCommand == "headers")
+    {
+        // Headers-first sync (client side). We learn the chain ahead from cheap
+        // (~80-byte) headers and queue the matching blocks for download through the
+        // normal getdata path. Block *validation* is unchanged -- every block is
+        // still fully checked by ProcessBlock/ConnectBlock when it arrives; headers
+        // only drive WHAT to fetch and IN WHAT ORDER. This is wire-compatible: peers
+        // already answer getheaders, and PROTOCOL_VERSION is unchanged.
+        std::vector<CBlock> vHeaders;
+        vRecv >> vHeaders;
+        if (vHeaders.empty())
+            return true;
+
+        CTxDB txdb("r");
+        int nQueued = 0;
+        for (const CBlock& header : vHeaders)
+        {
+            CInv inv(MSG_BLOCK, header.GetHash());
+            if (!AlreadyHave(txdb, inv))
+            {
+                pfrom->AddInventoryKnown(inv);
+                pfrom->AskFor(inv);   // existing priority download queue + getdata
+                nQueued++;
+            }
+        }
+        LogPrint("net", "headers-first: %d headers, queued %d blocks from %s\n",
+                 (int)vHeaders.size(), nQueued, pfrom->addr.ToString());
+    }
+
+
     else if (strCommand == "tx")
     {
         vector<uint256> vWorkQueue;
@@ -3854,6 +3889,16 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
         if (ProcessBlock(pfrom, &block))
             mapAlreadyAskedFor.erase(inv);
         if (block.nDoS) Misbehaving(pfrom->GetId(), block.nDoS);
+
+        // Headers-first: once our tip has advanced enough, pull the next batch of
+        // headers so the block-download queue keeps a rolling look-ahead. Throttled
+        // by height (not once-per-block) and dedup'd inside PushGetHeaders.
+        if (GetBoolArg("-headersfirst", true) && IsInitialBlockDownload() && pindexBest &&
+            pindexBest->nHeight >= g_nLastHeadersRequestHeight + 1000)
+        {
+            g_nLastHeadersRequestHeight = pindexBest->nHeight;
+            pfrom->PushGetHeaders(pindexBest, uint256(0));
+        }
     }
 
 
@@ -4211,7 +4256,15 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
         // Start block sync
         if (pto->fStartSync && !fImporting && !fReindex) {
             pto->fStartSync = false;
-            pto->PushGetBlocks(pindexBest, uint256(0));
+            // Headers-first (default on): learn the chain ahead from cheap headers
+            // and let the "headers" handler queue blocks for the normal getdata
+            // path. -headersfirst=0 falls back to the legacy inv/getblocks driver.
+            if (GetBoolArg("-headersfirst", true)) {
+                g_nLastHeadersRequestHeight = pindexBest ? pindexBest->nHeight : 0;
+                pto->PushGetHeaders(pindexBest, uint256(0));
+            } else {
+                pto->PushGetBlocks(pindexBest, uint256(0));
+            }
         }
 
         // Resend wallet transactions that haven't gotten in a block yet
