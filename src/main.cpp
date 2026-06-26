@@ -4618,9 +4618,17 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
                 if (nNowSec - nLastSyncLog >= 5)
                 {
                     nLastSyncLog = nNowSec;
-                    LogPrintf("sync: height=%d inflight=%u queued=%u orphans=%u\n",
+                    // How many distinct peers are actually carrying download work --
+                    // if this is ~1 while you have many peers, the others aren't
+                    // serving and download is single-peer-bound.
+                    std::set<NodeId> setDownloadPeers;
+                    for (std::map<uint256, std::pair<NodeId, int64_t> >::const_iterator it = g_mapBlocksInFlight.begin();
+                         it != g_mapBlocksInFlight.end(); ++it)
+                        setDownloadPeers.insert(it->second.first);
+                    LogPrintf("sync: height=%d inflight=%u peers=%u queued=%u orphans=%u\n",
                               pindexBest ? pindexBest->nHeight : 0,
                               (unsigned)g_mapBlocksInFlight.size(),
+                              (unsigned)setDownloadPeers.size(),
                               (unsigned)g_vBlocksToDownload.size(),
                               (unsigned)mapOrphanBlocks.size());
                 }
