@@ -94,6 +94,18 @@ extern enum Checkpoints::CPMode CheckpointsMode;
 // rolling look-ahead) instead of once per connected block.
 static int g_nLastHeadersRequestHeight = -1;
 
+// Multi-peer parallel block download (headers-first). Blocks learned from headers
+// are queued here and the scheduler in SendMessages assigns them across ALL peers
+// with a per-peer in-flight window, so the download isn't bottlenecked on one peer.
+// In-flight requests are re-queued on timeout (slow/gone peer). All of this is
+// touched only under cs_main. Non-consensus: blocks are still fully validated by
+// ProcessBlock on arrival; this only changes who we fetch each block from.
+static std::deque<uint256> g_vBlocksToDownload;            // queued, not yet requested (chain order)
+static std::set<uint256> g_setBlocksQueuedOrInFlight;     // dedup membership (queued ∪ in-flight)
+static std::map<uint256, std::pair<NodeId, int64_t> > g_mapBlocksInFlight; // hash -> (peer id, request time s)
+static const size_t MAX_BLOCKS_IN_FLIGHT_PER_PEER = 16;
+static const int64_t BLOCK_DOWNLOAD_TIMEOUT = 120;        // seconds before re-assigning
+
 unsigned int GetTargetSpacing()
 {
    unsigned int nStakeTargetSpacingSwitch = (fTestNet ? 1 * 60 : 1 * 30); // block spacing, 1 min tesnet, 30 seconds Main (OLD)
@@ -3821,10 +3833,13 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
             ++nConnected;
             CInv inv(MSG_BLOCK, header.GetHash());   // scrypt, only for connecting headers
             setBatch.insert(inv.hash);
-            if (!AlreadyHave(txdb, inv))
+            if (!AlreadyHave(txdb, inv) && !g_setBlocksQueuedOrInFlight.count(inv.hash))
             {
                 pfrom->AddInventoryKnown(inv);
-                pfrom->AskFor(inv);   // existing priority download queue + getdata
+                // Queue for the multi-peer scheduler (SendMessages) rather than the
+                // single sending peer, so the download spreads across all peers.
+                g_vBlocksToDownload.push_back(inv.hash);
+                g_setBlocksQueuedOrInFlight.insert(inv.hash);
                 ++nQueued;
             }
         }
@@ -3912,9 +3927,20 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
         CInv inv(MSG_BLOCK, hashBlock);
         pfrom->AddInventoryKnown(inv);
 
-        if (ProcessBlock(pfrom, &block))
+        bool fAccepted = ProcessBlock(pfrom, &block);
+        if (fAccepted)
             mapAlreadyAskedFor.erase(inv);
         if (block.nDoS) Misbehaving(pfrom->GetId(), block.nDoS);
+
+        // Multi-peer scheduler bookkeeping: free this block's in-flight slot. If it
+        // was accepted (connected or buffered as an orphan), drop it from the queue
+        // set; if it failed validation, re-queue so the scheduler can try another
+        // peer (a peer that lies repeatedly is banned by the DoS score above).
+        g_mapBlocksInFlight.erase(hashBlock);
+        if (fAccepted)
+            g_setBlocksQueuedOrInFlight.erase(hashBlock);
+        else if (g_setBlocksQueuedOrInFlight.count(hashBlock))
+            g_vBlocksToDownload.push_front(hashBlock);
 
         // Headers-first: once our tip has advanced enough, pull the next batch of
         // headers so the block-download queue keeps a rolling look-ahead. Throttled
@@ -4418,6 +4444,53 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
         if (!vInv.empty())
             pto->PushMessage("inv", vInv);
 
+
+        //
+        // Multi-peer parallel block download (headers-first): assign queued blocks
+        // to this peer up to its in-flight window, re-queuing timed-out requests so
+        // a slow/withholding peer doesn't wedge the whole sync.
+        //
+        if (GetBoolArg("-headersfirst", true) && pto->fSuccessfullyConnected && !pto->fDisconnect)
+        {
+            int64_t nNowSec = GetTime();
+            // Re-queue blocks whose download timed out (slow or disconnected peer).
+            for (std::map<uint256, std::pair<NodeId, int64_t> >::iterator it = g_mapBlocksInFlight.begin();
+                 it != g_mapBlocksInFlight.end(); )
+            {
+                if (nNowSec - it->second.second > BLOCK_DOWNLOAD_TIMEOUT)
+                {
+                    g_vBlocksToDownload.push_front(it->first);   // retry, prioritised
+                    g_mapBlocksInFlight.erase(it++);
+                }
+                else
+                    ++it;
+            }
+            // Count this peer's outstanding blocks.
+            size_t nInFlight = 0;
+            for (std::map<uint256, std::pair<NodeId, int64_t> >::const_iterator it = g_mapBlocksInFlight.begin();
+                 it != g_mapBlocksInFlight.end(); ++it)
+                if (it->second.first == pto->GetId())
+                    ++nInFlight;
+            // Assign up to the per-peer window.
+            std::vector<CInv> vGetBlocks;
+            while (nInFlight < MAX_BLOCKS_IN_FLIGHT_PER_PEER && !g_vBlocksToDownload.empty())
+            {
+                uint256 h = g_vBlocksToDownload.front();
+                g_vBlocksToDownload.pop_front();
+                if (mapBlockIndex.count(h) || mapOrphanBlocks.count(h))   // already have / buffered
+                {
+                    g_setBlocksQueuedOrInFlight.erase(h);
+                    continue;
+                }
+                if (g_mapBlocksInFlight.count(h))   // already assigned to another peer
+                    continue;
+                vGetBlocks.push_back(CInv(MSG_BLOCK, h));
+                g_mapBlocksInFlight[h] = std::make_pair(pto->GetId(), nNowSec);
+                ++nInFlight;
+            }
+            if (!vGetBlocks.empty())
+                pto->PushMessage("getdata", vGetBlocks);
+        }
 
         //
         // Message: getdata
