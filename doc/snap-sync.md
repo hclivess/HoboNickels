@@ -25,10 +25,14 @@ serving peer for the un-checkpointed recent tail, which is then synced + validat
    chainstate to `<datadir>/snapshot/` with a manifest (height, tip, per-file size+sha256).
    It then answers peers: `getsnapshot` → the manifest; `getsnapchunk(file,offset,len)` →
    the bytes (read-only, ≤1 MB, path-traversal-safe).
-2. **Fetch.** A fresh node (`-snapsync`, default on) asks a peer for the manifest, downloads
-   each file in chunks, verifies each file's sha256, and stages it to `<datadir>/snapshot/`
-   with a `READY` marker. Normal block sync is paused meanwhile so the datadir stays fresh.
-   It tries another peer on stall/mismatch and falls back to normal sync if none serve one.
+2. **Fetch.** A fresh node (`-snapsync`, default on) asks **every connected peer** for a
+   manifest in parallel and commits to the first that returns a valid one; it then downloads
+   that peer's files in chunks, verifies each file's sha256, and stages them to
+   `<datadir>/snapshot/` with a `READY` marker. Normal block sync is paused meanwhile so the
+   datadir stays fresh. If the chosen peer stalls mid-download it restarts discovery, and if
+   **no peer offers a snapshot within ~2 minutes** (the common case on a network where nobody
+   is seeding — e.g. all old clients, which ignore the request) it gives up and syncs
+   normally. So a node never hangs waiting for a snapshot that isn't there.
 3. **Apply.** On completion the node re-executes itself; the clean startup detects the
    staged snapshot, replaces the genesis-only chainstate with it, loads the index, and
    verifies the checkpoints. Then it syncs the (small) tail to the real tip normally.

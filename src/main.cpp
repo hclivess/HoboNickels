@@ -3517,11 +3517,13 @@ bool ApplySnapshotIfPresent(std::string& strInfo)
 // nodes) simply don't answer getsnapshot, so this is wire-compatible (no version
 // bump). Falls back to ordinary sync if no peer serves one.
 static const int SNAP_CHUNK_BYTES = 900000;
-static const int64_t SNAP_PEER_TIMEOUT = 60;   // seconds of no progress -> try another peer
+static const int64_t SNAP_PEER_TIMEOUT = 20;     // seconds of no progress from a peer -> try another
+static const int64_t SNAP_GIVEUP_SECONDS = 120;  // if no peer has offered a snapshot by now, sync normally
 
 struct CSnapFetch {
     bool fWanted, fDone;
     NodeId nPeer;
+    int64_t nWantStart;
     int64_t nLastProgress;
     int nHeight;
     std::string strManifest;
@@ -3530,19 +3532,20 @@ struct CSnapFetch {
     std::vector<uint256> vHashes;
     size_t nCurFile;
     uint64_t nCurOffset;
-    CSnapFetch() : fWanted(false), fDone(false), nPeer(-1), nLastProgress(0), nHeight(-1), nCurFile(0), nCurOffset(0) {}
+    std::set<NodeId> setAsked;   // peers we've sent getsnapshot to (parallel discovery)
+    CSnapFetch() : fWanted(false), fDone(false), nPeer(-1), nWantStart(0), nLastProgress(0), nHeight(-1), nCurFile(0), nCurOffset(0) {}
 };
 static CSnapFetch g_snap;
 bool g_fRestartForSnapshot = false;   // set when a fetched snapshot is staged -> re-exec to apply
 
-void SnapWant() { if (!g_snap.fDone) g_snap.fWanted = true; }
+void SnapWant() { if (!g_snap.fDone) { g_snap.fWanted = true; g_snap.nWantStart = GetTime(); } }
 bool SnapFetching() { return g_snap.fWanted && !g_snap.fDone; }   // pause normal block sync while true
 
 static void SnapReset()
 {
     g_snap.nPeer = -1; g_snap.nHeight = -1; g_snap.strManifest.clear();
     g_snap.vFiles.clear(); g_snap.vSizes.clear(); g_snap.vHashes.clear();
-    g_snap.nCurFile = 0; g_snap.nCurOffset = 0;
+    g_snap.nCurFile = 0; g_snap.nCurOffset = 0; g_snap.setAsked.clear();
     try { boost::filesystem::remove_all(GetSnapshotDir()); } catch (...) {}
 }
 
@@ -3574,19 +3577,36 @@ void SnapFetchSendMessages(CNode* pto)
 {
     if (!g_snap.fWanted || g_snap.fDone)
         return;
+    // Give up and sync normally if no peer has committed a snapshot in time. This is the
+    // common case on a network where no node is serving one (e.g. all old clients, which
+    // ignore getsnapshot): without this the node would spin forever with normal sync
+    // paused. Only applies before a download has actually started (no peer committed yet).
+    if (g_snap.nPeer == -1 && g_snap.nWantStart > 0 &&
+        GetTime() - g_snap.nWantStart > SNAP_GIVEUP_SECONDS)
+    {
+        LogPrintf("snapshot: no peer offered a snapshot within %ds; syncing normally\n", (int)SNAP_GIVEUP_SECONDS);
+        SnapReset();
+        g_snap.fWanted = false;   // resume normal block sync
+        return;
+    }
     if (g_snap.nPeer == -1)
     {
-        if (pto->fSuccessfullyConnected && !pto->fDisconnect)
+        // Discovery: ask every connected peer once, in parallel. Whoever returns a valid
+        // manifest first gets committed (in the "snapshot" handler). Old peers ignore
+        // this; new peers without a snapshot reply empty and are skipped. Parallel probing
+        // finds a seed fast and reliably regardless of how many old peers are mixed in.
+        if (pto->fSuccessfullyConnected && !pto->fDisconnect && !g_snap.setAsked.count(pto->GetId()))
         {
-            g_snap.nPeer = pto->GetId();
-            g_snap.nLastProgress = GetTime();
+            g_snap.setAsked.insert(pto->GetId());
             pto->PushMessage("getsnapshot");
-            LogPrintf("snapshot: requesting a chain snapshot from peer %d\n", (int)g_snap.nPeer);
+            LogPrintf("snapshot: requesting a chain snapshot from peer %d\n", (int)pto->GetId());
         }
     }
     else if (g_snap.nPeer == pto->GetId() && GetTime() - g_snap.nLastProgress > SNAP_PEER_TIMEOUT)
     {
-        LogPrintf("snapshot: peer %d stalled, will try another\n", (int)g_snap.nPeer);
+        // The peer we committed to (and are downloading from) went quiet -> abandon it and
+        // restart discovery from scratch (clears the asked-set so we re-probe everyone).
+        LogPrintf("snapshot: peer %d stalled mid-download, restarting discovery\n", (int)g_snap.nPeer);
         SnapReset();
     }
 }
@@ -4375,16 +4395,16 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
 
     else if (strCommand == "snapshot")
     {
-        // Client: received a peer's snapshot manifest -> start downloading its files.
-        if (!g_snap.fWanted || g_snap.fDone || g_snap.nPeer != pfrom->GetId())
-            return true;
+        // Client: received a peer's snapshot manifest. During parallel discovery we asked
+        // several peers at once; commit to the first that returns a usable manifest and
+        // ignore the rest. Peers with no snapshot reply empty -> just skip them.
+        if (!g_snap.fWanted || g_snap.fDone || g_snap.nPeer != -1)
+            return true;   // not wanting, or already committed to a peer
         std::string strManifest;
         vRecv >> strManifest;
         if (strManifest.empty() || !SnapParseManifest(strManifest))
-        {
-            SnapReset();   // this peer has nothing usable; try another
-            return true;
-        }
+            return true;   // this peer has nothing usable; keep waiting for another
+        g_snap.nPeer = pfrom->GetId();   // commit to this peer for the download
         g_snap.strManifest = strManifest;
         try { boost::filesystem::create_directories(GetSnapshotDir() / "txleveldb"); }
         catch (...) { SnapReset(); return true; }
