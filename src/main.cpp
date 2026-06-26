@@ -3791,6 +3791,15 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
         // already answer getheaders, and PROTOCOL_VERSION is unchanged.
         std::vector<CBlock> vHeaders;
         vRecv >> vHeaders;
+        // The getheaders reply is capped at 2000 headers by the server, so a larger
+        // message is malformed/abusive. Reject and penalise (mirrors the inv cap) so
+        // a peer can't flood the download queue or force unbounded scrypt hashing of
+        // headers under cs_main.
+        if (vHeaders.size() > 2000)
+        {
+            Misbehaving(pfrom->GetId(), 20);
+            return error("message headers size() = %u", vHeaders.size());
+        }
         if (vHeaders.empty())
             return true;
 
