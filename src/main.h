@@ -184,6 +184,10 @@ bool ProcessMessages(CNode* pfrom);
 bool SendMessages(CNode* pto, bool fSendTrickle);
 bool LoadExternalBlockFile(FILE* fileIn);
 
+// Chain snapshot (instant sync) -- see main.cpp.
+boost::filesystem::path GetSnapshotDir();
+bool CreateChainSnapshot(std::string& strError);
+
 // Run an instance of the script checking thread
 void ThreadScriptCheck(void* parg);
 // Stop the script checking threads

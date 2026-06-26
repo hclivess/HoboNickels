@@ -229,6 +229,7 @@ extern json_spirit::Value sendrawtransaction(CWallet* pWallet, const json_spirit
 
 extern json_spirit::Value getbestblockhash(CWallet* pWallet, const json_spirit::Array& params, bool fHelp); // in rpcblockchain.cpp
 extern json_spirit::Value getblockcount(CWallet* pWallet, const json_spirit::Array& params, bool fHelp); // in rpcblockchain.cpp
+extern json_spirit::Value createsnapshot(CWallet* pWallet, const json_spirit::Array& params, bool fHelp); // in rpcblockchain.cpp
 extern json_spirit::Value getdifficulty(CWallet* pWallet, const json_spirit::Array& params, bool fHelp);
 extern json_spirit::Value settxfee(CWallet* pWallet, const json_spirit::Array& params, bool fHelp);
 extern json_spirit::Value getrawmempool(CWallet* pWallet, const json_spirit::Array& params, bool fHelp);

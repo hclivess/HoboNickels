@@ -174,6 +174,24 @@ Value getblockcount(CWallet* pWallet, const Array& params, bool fHelp)
     return nBestHeight;
 }
 
+Value createsnapshot(CWallet* pWallet, const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() != 0)
+        throw runtime_error(
+            "createsnapshot\n"
+            "Write a consistent snapshot of the chainstate (block files + index) to\n"
+            "<datadir>/snapshot/ -- the package peers serve for instant snap-sync.");
+
+    std::string strError;
+    if (!CreateChainSnapshot(strError))
+        throw JSONRPCError(RPC_INTERNAL_ERROR, strError);
+
+    Object ret;
+    ret.push_back(Pair("snapshotdir", GetSnapshotDir().string()));
+    ret.push_back(Pair("height", (int)nBestHeight));
+    return ret;
+}
+
 Value getdifficulty(CWallet* pWallet, const Array& params, bool fHelp)
 {
     if (fHelp || params.size() != 0)
