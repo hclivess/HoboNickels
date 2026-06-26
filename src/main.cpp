@@ -3435,11 +3435,31 @@ bool ApplySnapshotIfPresent(std::string& strInfo)
     fs::path snapdir = GetSnapshotDir();
     if (!fs::exists(snapdir / "manifest.txt"))
         return false;
-    // Never clobber an existing chain -- only a fresh datadir.
-    if (fs::exists(GetDataDir() / "blk0001.dat") || fs::exists(GetDataDir() / "txleveldb" / "CURRENT"))
+    // A "READY" marker means our own P2P fetch staged this snapshot -- and the fetch only
+    // runs on a fresh node (below the snap-sync height gate), so the existing chainstate is
+    // just genesis and we replace it. Without the marker (a manual drop), only apply into a
+    // truly empty datadir so we never clobber a real chain. NB: genesis itself creates
+    // blk0001.dat + txleveldb on the first run, so we can't treat their mere presence as
+    // "has a chain" -- the marker is what distinguishes the fetch case.
+    bool fFetched = fs::exists(snapdir / "READY");
+    bool fEmptyDatadir = !fs::exists(GetDataDir() / "blk0001.dat") &&
+                         !fs::exists(GetDataDir() / "txleveldb" / "CURRENT");
+    if (!fFetched && !fEmptyDatadir)
         return false;
     try
     {
+        if (fFetched)
+        {
+            // Replace the genesis-only chainstate with the snapshot.
+            for (fs::directory_iterator it(GetDataDir()), end; it != end; ++it)
+            {
+                std::string name = it->path().filename().string();
+                if (name.size() > 4 && name.compare(0, 3, "blk") == 0 &&
+                    name.compare(name.size() - 4, 4, ".dat") == 0)
+                    fs::remove(it->path());
+            }
+            fs::remove_all(GetDataDir() / "txleveldb");
+        }
         int nHeight = -1;
         std::vector<std::pair<std::string, uint256> > files;
         fs::ifstream mf(snapdir / "manifest.txt");
@@ -3474,6 +3494,7 @@ bool ApplySnapshotIfPresent(std::string& strInfo)
         for (size_t i = 0; i < files.size(); i++)
             fs::copy_file(snapdir / files[i].first, GetDataDir() / files[i].first,
                           fs::copy_options::overwrite_existing);
+        try { fs::remove(snapdir / "READY"); } catch (...) {}   // apply once
         g_fSnapshotApplied = true;
         strInfo = strprintf("applied chain snapshot at height %d (verifying checkpoints after load)", nHeight);
         return true;
@@ -3482,6 +3503,89 @@ bool ApplySnapshotIfPresent(std::string& strInfo)
     {
         strInfo = std::string("snapshot apply failed: ") + e.what();
         return false;
+    }
+}
+
+
+// ---- snap-sync client: automatically fetch a chain snapshot from a peer -----
+// A fresh node (no chain) asks peers for a snapshot, downloads it in chunks to
+// <datadir>/snapshot/, verifies each file's hash against the served manifest, and
+// once complete stages it and restarts -- apply-on-startup then loads it and the
+// hardcoded checkpoints verify authenticity. Unknown-command-ignoring peers (old
+// nodes) simply don't answer getsnapshot, so this is wire-compatible (no version
+// bump). Falls back to ordinary sync if no peer serves one.
+static const int SNAP_CHUNK_BYTES = 900000;
+static const int64_t SNAP_PEER_TIMEOUT = 60;   // seconds of no progress -> try another peer
+
+struct CSnapFetch {
+    bool fWanted, fDone;
+    NodeId nPeer;
+    int64_t nLastProgress;
+    int nHeight;
+    std::string strManifest;
+    std::vector<std::string> vFiles;
+    std::vector<uint64_t> vSizes;
+    std::vector<uint256> vHashes;
+    size_t nCurFile;
+    uint64_t nCurOffset;
+    CSnapFetch() : fWanted(false), fDone(false), nPeer(-1), nLastProgress(0), nHeight(-1), nCurFile(0), nCurOffset(0) {}
+};
+static CSnapFetch g_snap;
+bool g_fRestartForSnapshot = false;   // set when a fetched snapshot is staged -> re-exec to apply
+
+void SnapWant() { if (!g_snap.fDone) g_snap.fWanted = true; }
+bool SnapFetching() { return g_snap.fWanted && !g_snap.fDone; }   // pause normal block sync while true
+
+static void SnapReset()
+{
+    g_snap.nPeer = -1; g_snap.nHeight = -1; g_snap.strManifest.clear();
+    g_snap.vFiles.clear(); g_snap.vSizes.clear(); g_snap.vHashes.clear();
+    g_snap.nCurFile = 0; g_snap.nCurOffset = 0;
+    try { boost::filesystem::remove_all(GetSnapshotDir()); } catch (...) {}
+}
+
+static bool SnapParseManifest(const std::string& s)
+{
+    g_snap.vFiles.clear(); g_snap.vSizes.clear(); g_snap.vHashes.clear(); g_snap.nHeight = -1;
+    std::istringstream in(s);
+    std::string line;
+    while (std::getline(in, line))
+    {
+        std::istringstream iss(line);
+        std::string tok; iss >> tok;
+        if (tok == "height") iss >> g_snap.nHeight;
+        else if (tok == "file")
+        {
+            std::string name; uint64_t sz = 0; std::string h;
+            iss >> name >> sz >> h;
+            if (name.empty() || name.find("..") != std::string::npos || name[0] == '/' ||
+                (name.compare(0, 3, "blk") != 0 && name.compare(0, 10, "txleveldb/") != 0))
+                return false;
+            g_snap.vFiles.push_back(name); g_snap.vSizes.push_back(sz); g_snap.vHashes.push_back(uint256(h));
+        }
+    }
+    return g_snap.nHeight >= 0 && !g_snap.vFiles.empty();
+}
+
+// Called per-peer from SendMessages: kick off / supervise the fetch.
+void SnapFetchSendMessages(CNode* pto)
+{
+    if (!g_snap.fWanted || g_snap.fDone)
+        return;
+    if (g_snap.nPeer == -1)
+    {
+        if (pto->fSuccessfullyConnected && !pto->fDisconnect)
+        {
+            g_snap.nPeer = pto->GetId();
+            g_snap.nLastProgress = GetTime();
+            pto->PushMessage("getsnapshot");
+            LogPrintf("snapshot: requesting a chain snapshot from peer %d\n", (int)g_snap.nPeer);
+        }
+    }
+    else if (g_snap.nPeer == pto->GetId() && GetTime() - g_snap.nLastProgress > SNAP_PEER_TIMEOUT)
+    {
+        LogPrintf("snapshot: peer %d stalled, will try another\n", (int)g_snap.nPeer);
+        SnapReset();
     }
 }
 
@@ -4267,6 +4371,79 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
     }
 
 
+    else if (strCommand == "snapshot")
+    {
+        // Client: received a peer's snapshot manifest -> start downloading its files.
+        if (!g_snap.fWanted || g_snap.fDone || g_snap.nPeer != pfrom->GetId())
+            return true;
+        std::string strManifest;
+        vRecv >> strManifest;
+        if (strManifest.empty() || !SnapParseManifest(strManifest))
+        {
+            SnapReset();   // this peer has nothing usable; try another
+            return true;
+        }
+        g_snap.strManifest = strManifest;
+        try { boost::filesystem::create_directories(GetSnapshotDir() / "txleveldb"); }
+        catch (...) { SnapReset(); return true; }
+        g_snap.nCurFile = 0; g_snap.nCurOffset = 0; g_snap.nLastProgress = GetTime();
+        LogPrintf("snapshot: peer %d offers height %d (%u files); downloading\n",
+                  (int)g_snap.nPeer, g_snap.nHeight, (unsigned)g_snap.vFiles.size());
+        pfrom->PushMessage("getsnapchunk", g_snap.vFiles[0], (int)0, (int)SNAP_CHUNK_BYTES);
+    }
+
+
+    else if (strCommand == "snapchunk")
+    {
+        // Client: a chunk of the current file -> append, verify on completion, advance.
+        if (!g_snap.fWanted || g_snap.fDone || g_snap.nPeer != pfrom->GetId())
+            return true;
+        std::string strFile; int nOffset = 0; std::vector<unsigned char> data;
+        vRecv >> strFile >> nOffset >> data;
+        if (g_snap.nCurFile >= g_snap.vFiles.size() ||
+            strFile != g_snap.vFiles[g_snap.nCurFile] || (uint64_t)nOffset != g_snap.nCurOffset)
+            return true;   // not what we asked for; ignore
+        boost::filesystem::path p = GetSnapshotDir() / strFile;
+        FILE* f = fopen(p.string().c_str(), nOffset == 0 ? "wb" : "ab");
+        if (!f) { SnapReset(); return true; }
+        if (!data.empty()) fwrite(&data[0], 1, data.size(), f);
+        fclose(f);
+        g_snap.nCurOffset += data.size();
+        g_snap.nLastProgress = GetTime();
+
+        bool fFileDone = data.empty() || g_snap.nCurOffset >= g_snap.vSizes[g_snap.nCurFile];
+        if (fFileDone)
+        {
+            if (HashSnapshotFile(p) != g_snap.vHashes[g_snap.nCurFile])
+            {
+                LogPrintf("snapshot: hash mismatch on %s -> abandoning this peer\n", strFile.c_str());
+                SnapReset();
+                return true;
+            }
+            g_snap.nCurFile++;
+            g_snap.nCurOffset = 0;
+            if (g_snap.nCurFile >= g_snap.vFiles.size())
+            {
+                // All files fetched + verified -> stage manifest and restart to apply.
+                boost::filesystem::ofstream mf(GetSnapshotDir() / "manifest.txt");
+                mf << g_snap.strManifest;
+                mf.close();
+                boost::filesystem::ofstream rf(GetSnapshotDir() / "READY"); rf << "1"; rf.close();
+                g_snap.fDone = true;
+                g_fRestartForSnapshot = true;
+                LogPrintf("snapshot: fetch complete (height %d); restarting to apply\n", g_snap.nHeight);
+                StartShutdown();
+                return true;
+            }
+            pfrom->PushMessage("getsnapchunk", g_snap.vFiles[g_snap.nCurFile], (int)0, (int)SNAP_CHUNK_BYTES);
+        }
+        else
+        {
+            pfrom->PushMessage("getsnapchunk", g_snap.vFiles[g_snap.nCurFile], (int)g_snap.nCurOffset, (int)SNAP_CHUNK_BYTES);
+        }
+    }
+
+
     else if (strCommand == "mempool")
     {
         std::vector<uint256> vtxid;
@@ -4604,8 +4781,9 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
              }
         }
 
-        // Start block sync
-        if (pto->fStartSync && !fImporting && !fReindex) {
+        // Start block sync (paused while fetching a chain snapshot, so the datadir stays
+        // fresh until the snapshot is applied).
+        if (pto->fStartSync && !fImporting && !fReindex && !SnapFetching()) {
             pto->fStartSync = false;
             // Headers-first (default on): learn the chain ahead from cheap headers
             // and let the "headers" handler queue blocks for the normal getdata
@@ -4744,12 +4922,16 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
             pto->PushMessage("inv", vInv);
 
 
+        // Snap-sync: if we want a chain snapshot, drive the fetch with this peer.
+        SnapFetchSendMessages(pto);
+
+
         //
         // Multi-peer parallel block download (headers-first): assign queued blocks
         // to this peer up to its in-flight window, re-queuing timed-out requests so
         // a slow/withholding peer doesn't wedge the whole sync.
         //
-        if (GetBoolArg("-headersfirst", true) && pto->fSuccessfullyConnected && !pto->fDisconnect)
+        if (GetBoolArg("-headersfirst", true) && pto->fSuccessfullyConnected && !pto->fDisconnect && !SnapFetching())
         {
             int64_t nNowSec = GetTime();
             // Re-queue overdue blocks -- but don't steal from a peer that's actively

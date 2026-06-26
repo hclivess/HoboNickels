@@ -189,6 +189,11 @@ boost::filesystem::path GetSnapshotDir();
 bool CreateChainSnapshot(std::string& strError);
 bool ApplySnapshotIfPresent(std::string& strInfo);
 extern bool g_fSnapshotApplied;
+// snap-sync client
+void SnapWant();
+bool SnapFetching();
+void SnapFetchSendMessages(CNode* pto);
+extern bool g_fRestartForSnapshot;
 
 // Run an instance of the script checking thread
 void ThreadScriptCheck(void* parg);

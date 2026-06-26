@@ -63,6 +63,8 @@ void StartShutdown()
 #endif
 }
 
+char** g_snapArgv = NULL;   // saved argv for the snapshot re-exec (set in main)
+
 void Shutdown(void* parg)
 {
     static CCriticalSection cs_Shutdown;
@@ -100,6 +102,16 @@ void Shutdown(void* parg)
         fExit = true;
 #ifndef QT_GUI
         // ensure non-UI client gets exited here, but let Bitcoin-Qt reach 'return 0;' in bitcoin.cpp
+        if (g_fRestartForSnapshot && g_snapArgv)
+        {
+            // A fetched chain snapshot was staged; re-exec so the clean startup applies it.
+            // Close inherited fds first -- notably the datadir .lock fd survives execv and
+            // would otherwise block the re-exec'd process from re-acquiring the lock.
+            LogPrintf("snapshot: re-executing to apply the fetched snapshot\n");
+            for (int fd = 3; fd < 1024; fd++)
+                close(fd);
+            execv(g_snapArgv[0], g_snapArgv);   // returns only on failure
+        }
         exit(0);
 #endif
     }
@@ -196,6 +208,7 @@ int main(int argc, char* argv[])
     // Connect bitcoind signal handlers
     noui_connect();
 
+    g_snapArgv = argv;   // for the snapshot re-exec from Shutdown()
     fRet = AppInit(argc, argv);
 
     if (fRet && fDaemon)
@@ -892,6 +905,12 @@ bool AppInit2()
         }
         LogPrintf("snapshot: verified against %d hardcoded checkpoint(s) at height %d\n", nChecked, nBestHeight);
     }
+
+    // Snap-sync: a fresh node (no chain yet, none already applied) wants to fetch a
+    // chain snapshot from a peer for instant sync. Once fetched it restarts to apply.
+    // -snapsync=0 opts out (full normal sync). Don't trigger if we already have a chain.
+    if (GetBoolArg("-snapsync", true) && !g_fSnapshotApplied && nBestHeight < 1000)
+        SnapWant();
 
     // as LoadBlockIndex can take several minutes, it's possible the user
     // requested to kill bitcoin-qt during the last operation. If so, exit.
