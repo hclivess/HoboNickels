@@ -3423,6 +3423,68 @@ bool CreateChainSnapshot(std::string& strError)
     return true;
 }
 
+bool g_fSnapshotApplied = false;   // set when a snapshot was applied this startup (-> verify checkpoints after load)
+
+// Called BEFORE LoadBlockIndex. If a snapshot is staged in <datadir>/snapshot/ and this is
+// a fresh datadir (no chain yet), verify each file's integrity against the manifest and
+// copy the chainstate into place so LoadBlockIndex loads it. Authenticity (right chain) is
+// then enforced after load by VerifyHardenedInChain (the hardcoded checkpoints).
+bool ApplySnapshotIfPresent(std::string& strInfo)
+{
+    namespace fs = boost::filesystem;
+    fs::path snapdir = GetSnapshotDir();
+    if (!fs::exists(snapdir / "manifest.txt"))
+        return false;
+    // Never clobber an existing chain -- only a fresh datadir.
+    if (fs::exists(GetDataDir() / "blk0001.dat") || fs::exists(GetDataDir() / "txleveldb" / "CURRENT"))
+        return false;
+    try
+    {
+        int nHeight = -1;
+        std::vector<std::pair<std::string, uint256> > files;
+        fs::ifstream mf(snapdir / "manifest.txt");
+        std::string line;
+        while (std::getline(mf, line))
+        {
+            std::istringstream iss(line);
+            std::string tok; iss >> tok;
+            if (tok == "height") iss >> nHeight;
+            else if (tok == "file")
+            {
+                std::string name; uintmax_t sz; std::string h;
+                iss >> name >> sz >> h;
+                files.push_back(std::make_pair(name, uint256(h)));
+            }
+        }
+        mf.close();
+        if (nHeight < 0 || files.empty()) { strInfo = "snapshot manifest invalid"; return false; }
+
+        // Integrity: every file's sha256 must match the manifest (catches transit corruption).
+        for (size_t i = 0; i < files.size(); i++)
+        {
+            fs::path src = snapdir / files[i].first;
+            if (!fs::exists(src) || HashSnapshotFile(src) != files[i].second)
+            {
+                strInfo = "snapshot integrity check failed: " + files[i].first;
+                return false;
+            }
+        }
+        // Copy chainstate into the datadir (LoadBlockIndex will load it).
+        fs::create_directories(GetDataDir() / "txleveldb");
+        for (size_t i = 0; i < files.size(); i++)
+            fs::copy_file(snapdir / files[i].first, GetDataDir() / files[i].first,
+                          fs::copy_options::overwrite_existing);
+        g_fSnapshotApplied = true;
+        strInfo = strprintf("applied chain snapshot at height %d (verifying checkpoints after load)", nHeight);
+        return true;
+    }
+    catch (std::exception& e)
+    {
+        strInfo = std::string("snapshot apply failed: ") + e.what();
+        return false;
+    }
+}
+
 
 
 

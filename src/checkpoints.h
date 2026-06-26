@@ -39,6 +39,7 @@ namespace Checkpoints
 
     // Returns true if block passes checkpoint checks
     bool CheckHardened(int nHeight, const uint256& hash);
+    bool VerifyHardenedInChain(int nBestHeight, int& nChecked, std::string& strError);
 
     // Return conservative estimate of total number of blocks, 0 if unknown
     int GetTotalBlocksEstimate();

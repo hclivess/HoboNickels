@@ -65,6 +65,30 @@ namespace Checkpoints
         return hash == i->second;
     }
 
+    // Trust anchor for an applied chain snapshot: every hardcoded checkpoint at or below
+    // the loaded tip must be present in the loaded index, by hash, at exactly its height.
+    // A forged snapshot (different chain) cannot contain them, so it is rejected. Returns
+    // false if any reachable checkpoint is missing/wrong; nChecked reports how many matched
+    // (0 => the snapshot is below all checkpoints, i.e. not meaningfully anchored).
+    bool VerifyHardenedInChain(int nBestHeight, int& nChecked, std::string& strError)
+    {
+        MapCheckpoints& checkpoints = (fTestNet ? mapCheckpointsTestnet : mapCheckpoints);
+        nChecked = 0;
+        for (const MapCheckpoints::value_type& i : checkpoints)
+        {
+            if (i.first == 0 || i.first > nBestHeight)
+                continue;   // genesis is implicit; can't verify checkpoints beyond the tip
+            std::map<uint256, CBlockIndex*>::const_iterator t = mapBlockIndex.find(i.second);
+            if (t == mapBlockIndex.end() || t->second->nHeight != i.first)
+            {
+                strError = strprintf("missing/mismatched hardcoded checkpoint at height %d", i.first);
+                return false;
+            }
+            nChecked++;
+        }
+        return true;
+    }
+
     int GetTotalBlocksEstimate()
     {
         MapCheckpoints& checkpoints = (fTestNet ? mapCheckpointsTestnet : mapCheckpoints);

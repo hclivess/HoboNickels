@@ -859,11 +859,39 @@ bool AppInit2()
         return false;
     }
 
+    // Instant sync: if a verified chain snapshot is staged in <datadir>/snapshot/ and this
+    // is a fresh datadir, apply it (copy the chainstate into place) before loading the
+    // index, so the node comes up already synced. Authenticity is enforced right after
+    // the index loads, below, against the hardcoded checkpoints.
+    if (GetBoolArg("-snapsync", true))
+    {
+        std::string strSnap;
+        if (ApplySnapshotIfPresent(strSnap))
+            uiInterface.InitMessage(_("Applying chain snapshot (instant sync)..."));
+        if (!strSnap.empty())
+            LogPrintf("snapshot: %s\n", strSnap);
+    }
+
     uiInterface.InitMessage(_("Loading block index..."));
 
     nStart = GetTimeMillis();
     if (!LoadBlockIndex())
         return InitError(_("Error loading blkindex.dat"));
+
+    // Trust anchor for an applied snapshot: the loaded chain must contain every hardcoded
+    // checkpoint at/below the tip. A forged snapshot is rejected here (remove it + stop so
+    // a restart syncs normally).
+    if (g_fSnapshotApplied)
+    {
+        int nChecked = 0;
+        std::string strErr;
+        if (!Checkpoints::VerifyHardenedInChain(nBestHeight, nChecked, strErr))
+        {
+            try { boost::filesystem::remove_all(GetSnapshotDir()); } catch (...) {}
+            return InitError(strprintf(_("Chain snapshot failed checkpoint verification (%s). It was discarded; restart to sync normally."), strErr));
+        }
+        LogPrintf("snapshot: verified against %d hardcoded checkpoint(s) at height %d\n", nChecked, nBestHeight);
+    }
 
     // as LoadBlockIndex can take several minutes, it's possible the user
     // requested to kill bitcoin-qt during the last operation. If so, exit.

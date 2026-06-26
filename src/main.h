@@ -187,6 +187,8 @@ bool LoadExternalBlockFile(FILE* fileIn);
 // Chain snapshot (instant sync) -- see main.cpp.
 boost::filesystem::path GetSnapshotDir();
 bool CreateChainSnapshot(std::string& strError);
+bool ApplySnapshotIfPresent(std::string& strInfo);
+extern bool g_fSnapshotApplied;
 
 // Run an instance of the script checking thread
 void ThreadScriptCheck(void* parg);
