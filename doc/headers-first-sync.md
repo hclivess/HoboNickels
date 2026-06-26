@@ -46,6 +46,28 @@ download against a known-ahead chain, not skipping any checks.
 Net effect vs. legacy: a ~2000-block rolling window fed by cheap headers and filled
 by pipelined `getdata`, instead of 500-block batches gated by a full round-trip each.
 
+## DoS hardening
+
+The `headers` handler is the new peer-facing attack surface, so it is bounded
+several ways (a malicious peer cannot turn it into cheap work):
+
+- **Per-message cap.** A `headers` message larger than 2000 (the server's own reply
+  limit) is rejected and the peer is ban-scored — like the `inv` handler.
+- **Connecting-headers only.** The expensive part is `GetHash()`, which on a scrypt
+  coin is the memory-hard hash. So a header is hashed/queued only if it **connects**
+  to a block we know or to an earlier header in the same batch — checked first via
+  the plain `hashPrevBlock` field (no hashing). Junk headers with unknown prevs are
+  dropped *before* any scrypt cost, and a batch that connects to nothing ban-scores
+  the peer. Forging a *connecting* chain costs the attacker the same scrypt work, so
+  the asymmetry that made this a cheap DoS is gone.
+- **Bounded request queue.** `AskFor` caps the per-peer pending-request queue (far
+  above any normal download window), so fabricated hashes can't grow it without limit.
+
+Deferred follow-ups (defense-in-depth, lower priority now that the above make attacks
+symmetric/expensive): move the header hash loop out of the `cs_main` critical section;
+a per-peer headers-message rate limit; and a `mapOrphanBlocks` cap (pre-existing, not
+introduced by headers-first).
+
 ## Roadmap (next iterations)
 
 - **Multi-peer parallel download** — request the in-flight window across several peers

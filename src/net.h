@@ -451,6 +451,11 @@ public:
 
     void AskFor(const CInv& inv)
     {
+        // Bound the per-peer request queue so a peer can't inflate it without limit
+        // (e.g. with fabricated block hashes via headers/inv). 50000 is far above any
+        // normal download window, so legitimate sync is never affected.
+        if (mapAskFor.size() >= 50000)
+            return;
         // We're using mapAskFor as a priority queue,
         // the key is the earliest time the request can be sent
         int64_t& nRequestTime = mapAlreadyAskedFor[inv];

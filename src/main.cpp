@@ -3804,19 +3804,36 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
             return true;
 
         CTxDB txdb("r");
-        int nQueued = 0;
+        std::set<uint256> setBatch;   // hashes accepted earlier in THIS message
+        int nQueued = 0, nConnected = 0;
         for (const CBlock& header : vHeaders)
         {
-            CInv inv(MSG_BLOCK, header.GetHash());
+            // Only spend the memory-hard scrypt GetHash() (and a getdata) on headers
+            // that CONNECT to a block we know, or to an earlier header in this same
+            // batch. hashPrevBlock is a plain field (no hashing), so junk headers
+            // referencing unknown prevs are dropped BEFORE any scrypt cost -- which
+            // removes the asymmetric DoS where a peer cheaply forces 2000 scrypt
+            // hashes / getdata per message. Forging a *connecting* chain costs the
+            // attacker the same scrypt work, so it is no longer cheap.
+            const uint256& prev = header.hashPrevBlock;
+            if (!mapBlockIndex.count(prev) && !setBatch.count(prev))
+                continue;
+            ++nConnected;
+            CInv inv(MSG_BLOCK, header.GetHash());   // scrypt, only for connecting headers
+            setBatch.insert(inv.hash);
             if (!AlreadyHave(txdb, inv))
             {
                 pfrom->AddInventoryKnown(inv);
                 pfrom->AskFor(inv);   // existing priority download queue + getdata
-                nQueued++;
+                ++nQueued;
             }
         }
-        LogPrint("net", "headers-first: %d headers, queued %d blocks from %s\n",
-                 (int)vHeaders.size(), nQueued, pfrom->addr.ToString());
+        // A whole batch that connects to nothing we know is junk -- penalise it so a
+        // stream of unconnectable headers quickly bans the peer.
+        if (nConnected == 0)
+            Misbehaving(pfrom->GetId(), 20);
+        LogPrint("net", "headers-first: %d headers, %d connected, queued %d from %s\n",
+                 (int)vHeaders.size(), nConnected, nQueued, pfrom->addr.ToString());
     }
 
 
