@@ -93,6 +93,11 @@ extern enum Checkpoints::CPMode CheckpointsMode;
 // pull the next header batch only after we've made real download progress (a
 // rolling look-ahead) instead of once per connected block.
 static int g_nLastHeadersRequestHeight = -1;
+// Throttle the orphan-recovery getblocks: during headers-first IBD blocks arrive out
+// of order so orphans are routine, and firing a getblocks for every one re-fetches
+// whole ranges the scheduler already owns ("already have block" floods). One occasional
+// safety-net poll is enough to recover a genuine gap, so we rate-limit it.
+static int64_t g_nLastOrphanGetBlocks = 0;
 
 // Multi-peer parallel block download (headers-first). Blocks learned from headers
 // are queued here and the scheduler in SendMessages assigns them across ALL peers
@@ -104,6 +109,13 @@ static std::deque<uint256> g_vBlocksToDownload;            // queued, not yet re
 static std::set<uint256> g_setBlocksQueuedOrInFlight;     // dedup membership (queued ∪ in-flight)
 static std::map<uint256, std::pair<NodeId, int64_t> > g_mapBlocksInFlight; // hash -> (peer id, request time s)
 static const size_t MAX_BLOCKS_IN_FLIGHT_PER_PEER = 16;
+// Smart requesting: don't fetch faster than we can connect. We stop requesting blocks
+// further ahead once this many out-of-order blocks are already buffered waiting for the
+// tip to reach them. This keeps the reorder buffer well under MAX_ORPHAN_BLOCKS (so a
+// still-needed block is never evicted -> no stalls), bounds orphan churn, and is far
+// above any normal per-tick window so healthy sync is never throttled. The stall-breaker
+// is deliberately NOT gated by this -- recovering the wedge block is always allowed.
+static const size_t MAX_REORDER_BUFFER = 256;
 static const int64_t BLOCK_DOWNLOAD_TIMEOUT = 30;         // seconds before fully re-assigning a stuck request
 static const int64_t BLOCK_STALL_TIMEOUT = 10;            // seconds before *redundantly* re-requesting the oldest
                                                           // outstanding block from a second peer once the queue
@@ -429,7 +441,10 @@ unsigned int LimitOrphanTxSize(unsigned int nMaxOrphans)
 // Bound the orphan-block buffer. mapOrphanBlocks held full heap CBlock copies with
 // no eviction; multi-peer out-of-order download makes orphan accumulation routine,
 // so cap it (evicting random orphans) like the orphan-tx buffer. Non-consensus.
-static const unsigned int MAX_ORPHAN_BLOCKS = 750;
+// Kept well above MAX_REORDER_BUFFER (+ the in-flight window) so the normal headers-first
+// reorder buffer never triggers eviction -- eviction is only a backstop against a peer
+// flooding genuinely unconnectable orphans.
+static const unsigned int MAX_ORPHAN_BLOCKS = 2000;
 
 unsigned int LimitOrphanBlocks(unsigned int nMaxOrphans)
 {
@@ -2763,7 +2778,14 @@ bool ProcessBlock(CNode* pfrom, CBlock* pblock)
     // If don't already have its previous block, shunt it off to holding area until we get it
     if (!mapBlockIndex.count(pblock->hashPrevBlock))
     {
-        LogPrintf("ProcessBlock: ORPHAN BLOCK, prev=%s\n", pblock->hashPrevBlock.ToString().substr(0,20));
+        // During headers-first IBD, blocks routinely arrive a little before their
+        // parent and sit here briefly as a reorder buffer (they connect in order with
+        // zero re-fetch) -- that's normal, so don't spam it at top level; -debug=net
+        // still shows it. A genuine orphan once synced is still logged loudly.
+        if (GetBoolArg("-headersfirst", true) && IsInitialBlockDownload())
+            LogPrint("net", "ProcessBlock: out-of-order block buffered, prev=%s\n", pblock->hashPrevBlock.ToString().substr(0,20));
+        else
+            LogPrintf("ProcessBlock: ORPHAN BLOCK, prev=%s\n", pblock->hashPrevBlock.ToString().substr(0,20));
         // check proof-of-stake
         if (pblock->IsProofOfStake())
         {
@@ -2779,14 +2801,24 @@ bool ProcessBlock(CNode* pfrom, CBlock* pblock)
         mapOrphanBlocksByPrev.insert(make_pair(pblock2->hashPrevBlock, pblock2));
         LimitOrphanBlocks(MAX_ORPHAN_BLOCKS);
 
-        // Ask this guy to fill in what we're missing
+        // Ask this guy to fill in what we're missing. During headers-first IBD the
+        // scheduler already has the ancestors queued, so this is only a safety net for
+        // a genuine gap -- rate-limit it (>=1s) so it doesn't fire per-orphan and
+        // re-fetch ranges we're already downloading (the "already have block" floods).
+        // Outside IBD it fires normally.
         if (pfrom)
         {
-            pfrom->PushGetBlocks(pindexBest, GetOrphanRoot(pblock2));
-            // ppcoin: getblocks may not obtain the ancestor block rejected
-            // earlier by duplicate-stake check so we ask for it again directly
-            if (!IsInitialBlockDownload())
-                pfrom->AskFor(CInv(MSG_BLOCK, WantedByOrphan(pblock2)));
+            int64_t nNow = GetTime();
+            bool fHFIBD = GetBoolArg("-headersfirst", true) && IsInitialBlockDownload();
+            if (!fHFIBD || nNow - g_nLastOrphanGetBlocks >= 1)
+            {
+                g_nLastOrphanGetBlocks = nNow;
+                pfrom->PushGetBlocks(pindexBest, GetOrphanRoot(pblock2));
+                // ppcoin: getblocks may not obtain the ancestor block rejected
+                // earlier by duplicate-stake check so we ask for it again directly
+                if (!IsInitialBlockDownload())
+                    pfrom->AskFor(CInv(MSG_BLOCK, WantedByOrphan(pblock2)));
+            }
         }
         return true;
     }
@@ -3652,11 +3684,18 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
 
             LogPrint("net", "  got inventory: %s  %s\n", inv.ToString(), fAlreadyHave ? "have" : "new");
 
-            if (!fAlreadyHave)
+            // Smart requesting: a block the headers-first scheduler is already handling
+            // (queued or in flight) must NOT also be requested here via AskFor -- doing
+            // both fetches it twice and is the real source of the "already have block"
+            // floods. Treat such a block as spoken-for (the fAlreadyHave guards below
+            // keep the legacy getblocks branches from acting on a not-yet-connected one).
+            bool fHFTracked = (inv.type == MSG_BLOCK && g_setBlocksQueuedOrInFlight.count(inv.hash));
+
+            if (!fAlreadyHave && !fHFTracked)
                 pfrom->AskFor(inv);
-            else if (inv.type == MSG_BLOCK && mapOrphanBlocks.count(inv.hash)) {
+            else if (fAlreadyHave && inv.type == MSG_BLOCK && mapOrphanBlocks.count(inv.hash)) {
                 pfrom->PushGetBlocks(pindexBest, GetOrphanRoot(mapOrphanBlocks[inv.hash]));
-            } else if (nInv == nLastBlock) {
+            } else if (fAlreadyHave && !fHFTracked && nInv == nLastBlock) {
                 // In case we are on a very long side-chain, it is possible that we already have
                 // the last block in an inv bundle sent in response to getblocks. Try to detect
                 // this situation and push another getblocks to continue.
@@ -4509,9 +4548,14 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
                  it != g_mapBlocksInFlight.end(); ++it)
                 if (it->second.first == pto->GetId())
                     ++nInFlight;
-            // Assign up to the per-peer window.
+            // Assign up to the per-peer window -- but stop fetching further ahead while
+            // a big reorder buffer is already waiting for the tip (smart requesting:
+            // don't outrun the connect rate, or the buffer runs away and evicts a
+            // still-needed block). The stall-breaker below is NOT gated by this, so the
+            // wedge block can always be (re)fetched to let the tip catch up.
             std::vector<CInv> vGetBlocks;
-            while (nInFlight < MAX_BLOCKS_IN_FLIGHT_PER_PEER && !g_vBlocksToDownload.empty())
+            while (nInFlight < MAX_BLOCKS_IN_FLIGHT_PER_PEER && !g_vBlocksToDownload.empty() &&
+                   mapOrphanBlocks.size() < MAX_REORDER_BUFFER)
             {
                 uint256 h = g_vBlocksToDownload.front();
                 g_vBlocksToDownload.pop_front();
