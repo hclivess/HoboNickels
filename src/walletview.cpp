@@ -145,8 +145,8 @@ void WalletView::createActions()
     addressBookAction->setShortcut(QKeySequence(Qt::ALT + Qt::Key_5));
     tabGroup->addAction(addressBookAction);
 
-    charityAction = new QAction(QIcon(":/icons/send"), tr("Stake For &Charity"), this);
-    charityAction->setStatusTip(tr("Enable Stake For Charity"));
+    charityAction = new QAction(QIcon(":/icons/staking_on"), tr("Stake For &Charity"), this);
+    charityAction->setStatusTip(tr("Donate a share of your stake rewards to a charity address"));
     charityAction->setToolTip(charityAction->statusTip());
     charityAction->setShortcut(QKeySequence(Qt::ALT + Qt::Key_6));
     charityAction->setCheckable(true);
