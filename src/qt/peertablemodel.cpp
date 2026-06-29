@@ -27,13 +27,31 @@ bool NodeLessThan::operator()(const CNodeCombinedStats &left, const CNodeCombine
     {
     case PeerTableModel::Address:
         return pLeft->addrName.compare(pRight->addrName) < 0;
+    case PeerTableModel::Direction:
+        return pLeft->fInbound < pRight->fInbound;
     case PeerTableModel::Subversion:
         return pLeft->cleanSubVer.compare(pRight->cleanSubVer) < 0;
+    case PeerTableModel::Sent:
+        return pLeft->nSendBytes < pRight->nSendBytes;
+    case PeerTableModel::Received:
+        return pLeft->nRecvBytes < pRight->nRecvBytes;
     case PeerTableModel::Ping:
         return pLeft->dPingTime < pRight->dPingTime;
     }
 
     return false;
+}
+
+// Compact byte formatter for the Sent/Received columns (B/KB/MB/GB).
+QString PeerTableModel::formatBytes(quint64 bytes)
+{
+    if (bytes < 1024)
+        return QString("%1 B").arg(bytes);
+    if (bytes < 1024ULL * 1024)
+        return QString("%1 KB").arg(bytes / 1024.0, 0, 'f', 1);
+    if (bytes < 1024ULL * 1024 * 1024)
+        return QString("%1 MB").arg(bytes / 1048576.0, 0, 'f', 1);
+    return QString("%1 GB").arg(bytes / 1073741824.0, 0, 'f', 2);
 }
 
 // private implementation
@@ -109,7 +127,8 @@ PeerTableModel::PeerTableModel(ClientModel *parent) :
     clientModel(parent),
     timer(0)
 {
-    columns << tr("Address/Hostname") << tr("User Agent") << tr("Ping Time");
+    columns << tr("Address/Hostname") << tr("Dir") << tr("User Agent")
+            << tr("Sent") << tr("Received") << tr("Ping Time");
     priv = new PeerTablePriv();
     // default to unsorted
     priv->sortColumn = -1;
@@ -158,10 +177,28 @@ QVariant PeerTableModel::data(const QModelIndex &index, int role) const
         {
         case Address:
             return QString::fromStdString(rec->nodeStats.addrName);
+        case Direction:
+            return rec->nodeStats.fInbound ? tr("In") : tr("Out");
         case Subversion:
             return QString::fromStdString(rec->nodeStats.cleanSubVer);
+        case Sent:
+            return PeerTableModel::formatBytes(rec->nodeStats.nSendBytes);
+        case Received:
+            return PeerTableModel::formatBytes(rec->nodeStats.nRecvBytes);
         case Ping:
             return GUIUtil::formatPingTime(rec->nodeStats.dPingTime);
+        }
+    }
+    else if(role == Qt::TextAlignmentRole)
+    {
+        switch(index.column())
+        {
+        case Sent:
+        case Received:
+        case Ping:
+            return (int)(Qt::AlignRight | Qt::AlignVCenter);
+        case Direction:
+            return (int)(Qt::AlignCenter);
         }
     }
     return QVariant();

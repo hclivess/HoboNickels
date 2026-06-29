@@ -13,6 +13,10 @@
 
 #include <QThread>
 #include <QKeyEvent>
+#include <QSettings>
+#include <QMenu>
+#include <QClipboard>
+#include <QApplication>
 
 #if QT_VERSION < 0x050000
 #include <QUrl>
@@ -226,10 +230,21 @@ RPCConsole::RPCConsole(QWidget *parent) :
     ui->peerHeading->setText(tr("Select a peer to view detailed information."));
 
     clear();
+
+    // Restore persisted command history (clear() resets it, so load afterwards).
+    {
+        QSettings settings;
+        history = settings.value("RPCConsoleHistory").toStringList();
+        historyPtr = history.size();
+    }
 }
 
 RPCConsole::~RPCConsole()
 {
+    {
+        QSettings settings;
+        settings.setValue("RPCConsoleHistory", history);
+    }
     emit stopExecutor();
     delete ui;
 }
@@ -292,6 +307,14 @@ void RPCConsole::setClientModel(ClientModel *model)
         ui->peerWidget->setColumnWidth(PeerTableModel::Address, ADDRESS_COLUMN_WIDTH);
         ui->peerWidget->setColumnWidth(PeerTableModel::Subversion, SUBVERSION_COLUMN_WIDTH);
         ui->peerWidget->setColumnWidth(PeerTableModel::Ping, PING_COLUMN_WIDTH);
+        ui->peerWidget->setColumnWidth(PeerTableModel::Direction, 44);
+        ui->peerWidget->setColumnWidth(PeerTableModel::Sent, 76);
+        ui->peerWidget->setColumnWidth(PeerTableModel::Received, 76);
+
+        // Right-click menu on the peer table (copy address / peer info).
+        ui->peerWidget->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(ui->peerWidget, SIGNAL(customContextMenuRequested(const QPoint&)),
+                this, SLOT(showPeerContextMenu(const QPoint&)));
 
         // connect the peerWidget selection model to our peerSelected() handler
         connect(ui->peerWidget->selectionModel(), SIGNAL(selectionChanged(const QItemSelection &, const QItemSelection &)),
@@ -352,7 +375,10 @@ void RPCConsole::clear()
 
     message(CMD_REPLY, (tr("Welcome to the HoboNickels RPC console.") + "<br>" +
                         tr("Use up and down arrows to navigate history, and <b>Ctrl-L</b> to clear screen.") + "<br>" +
-                        tr("Type <b>help</b> for an overview of available commands.")), true);
+                        tr("Type <b>help</b> for an overview of available commands.") + "<br>" +
+                        "<span style='color:#c83737;'><b>" +
+                        tr("WARNING: Never run a command here that someone told you to. Commands on this console can access your wallet and steal your coins. If you don't understand a command, don't run it.") +
+                        "</b></span>"), true);
 }
 
 void RPCConsole::message(int category, const QString &message, bool html)
@@ -397,13 +423,17 @@ void RPCConsole::on_lineEdit_returnPressed()
     {
         message(CMD_REQUEST, cmd);
         emit cmdRequest(cmd);
-        // Remove command, if already in history
-        history.removeOne(cmd);
-        // Append command to history
-        history.append(cmd);
-        // Enforce maximum history size
-        while(history.size() > CONSOLE_HISTORY)
-            history.removeFirst();
+        // Keep secrets out of history: never store a command that carries a passphrase or key.
+        static const QStringList sensitiveCmds = QStringList()
+            << "walletpassphrase" << "walletpassphrasechange" << "encryptwallet"
+            << "importprivkey" << "dumpprivkey" << "signmessage";
+        if(!sensitiveCmds.contains(cmd.section(' ', 0, 0).toLower()))
+        {
+            history.removeOne(cmd);
+            history.append(cmd);
+            while(history.size() > CONSOLE_HISTORY)
+                history.removeFirst();
+        }
         // Set pointer to end of history
         historyPtr = history.size();
         // Scroll console view to end
@@ -491,6 +521,40 @@ QString RPCConsole::FormatBytes(quint64 bytes)
         return QString(tr("%1 MB")).arg(bytes / 1024 / 1024);
 
     return QString(tr("%1 GB")).arg(bytes / 1024 / 1024 / 1024);
+}
+
+void RPCConsole::showPeerContextMenu(const QPoint &pos)
+{
+    if(!clientModel)
+        return;
+    QModelIndex idx = ui->peerWidget->indexAt(pos);
+    if(!idx.isValid())
+        return;
+    PeerTableModel *m = clientModel->getPeerTableModel();
+    if(!m)
+        return;
+    int row = idx.row();
+
+    QMenu menu(this);
+    QAction *aCopyAddr = menu.addAction(tr("Copy address"));
+    QAction *aCopyInfo = menu.addAction(tr("Copy peer info"));
+    QAction *chosen = menu.exec(ui->peerWidget->viewport()->mapToGlobal(pos));
+    if(!chosen)
+        return;
+
+    if(chosen == aCopyAddr)
+    {
+        QApplication::clipboard()->setText(
+            m->data(m->index(row, PeerTableModel::Address, QModelIndex()), Qt::DisplayRole).toString());
+    }
+    else if(chosen == aCopyInfo)
+    {
+        QStringList parts;
+        for(int c = 0; c < m->columnCount(QModelIndex()); ++c)
+            parts << m->headerData(c, Qt::Horizontal, Qt::DisplayRole).toString() + ": " +
+                     m->data(m->index(row, c, QModelIndex()), Qt::DisplayRole).toString();
+        QApplication::clipboard()->setText(parts.join("\n"));
+    }
 }
 
 void RPCConsole::setTrafficGraphRange(int mins)

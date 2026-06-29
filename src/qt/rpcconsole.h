@@ -51,6 +51,8 @@ private slots:
     void updateTrafficStats(quint64 totalBytesIn, quint64 totalBytesOut);
     /** clear traffic graph */
     void on_btnClearTrafficGraph_clicked();
+    /** right-click menu on the peer table (copy address / peer info) */
+    void showPeerContextMenu(const QPoint &pos);
     void resizeEvent(QResizeEvent *event);
     void showEvent(QShowEvent *event);
     void hideEvent(QHideEvent *event);

@@ -46,13 +46,17 @@ public:
     explicit PeerTableModel(ClientModel *parent = 0);
     const CNodeCombinedStats *getNodeStats(int idx);
     int getRowByNodeId(NodeId nodeid);
+    static QString formatBytes(quint64 bytes);
     void startAutoRefresh();
     void stopAutoRefresh();
 
     enum ColumnIndex {
         Address = 0,
-        Subversion = 1,
-        Ping = 2
+        Direction = 1,
+        Subversion = 2,
+        Sent = 3,
+        Received = 4,
+        Ping = 5
     };
 
     /** @name Methods overridden from QAbstractTableModel
