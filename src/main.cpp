@@ -127,6 +127,9 @@ static const int64_t BLOCK_STALL_TIMEOUT = 10;            // seconds before *red
                                                           // outstanding block from a second peer once the queue
                                                           // has drained -- breaks a tip wedged on one slow peer
                                                           // (the #1 cause of idle-CPU, crawling sync)
+static const int64_t SYNC_HEADERS_RETRY = 20;             // s; re-request headers when the IBD pipeline has starved
+static const int64_t WALLET_LOCATOR_WRITE_INTERVAL = 300; // s; persist the wallet sync position this often during IBD
+static const int64_t PEER_BLOCKTIME_MAX_AGE = 1800;       // s; drop a peer's last-delivery record after this (leak bound)
 
 unsigned int GetTargetSpacing()
 {
@@ -2295,12 +2298,32 @@ bool CBlock::SetBestChain(CTxDB& txdb, CBlockIndex* pindexNew)
         }
     }
 
-    // Update best block in wallet (so we can detect restored wallets)
+    // Update best block in wallet (so we can detect restored wallets).
+    // Outside IBD every connected block records the wallet's sync position. The
+    // original code skipped this ENTIRELY during IBD (writing it per-block was too
+    // costly), which is why an interrupted multi-day sync rescanned from genesis on
+    // every restart: the recorded position never advanced. We now also persist it
+    // PERIODICALLY during IBD (cheap -- one walletdb write every few minutes), so a
+    // restart only rescans a short recent window. This is the long-standing upstream
+    // (Novacoin/PPCoin-era) behaviour that newer Bitcoin Core later fixed the same way.
     bool fIsInitialDownload = IsInitialBlockDownload();
+    static int64_t nLastWalletLocatorWrite = 0;
+    int64_t nLocatorNow = GetTime();
     if (!fIsInitialDownload)
     {
         const CBlockLocator locator(pindexNew);
         ::SetBestChain(locator);
+        nLastWalletLocatorWrite = nLocatorNow;
+    }
+    else if (nLastWalletLocatorWrite == 0)
+    {
+        nLastWalletLocatorWrite = nLocatorNow;   // arm the timer; don't write on the first block
+    }
+    else if (nLocatorNow - nLastWalletLocatorWrite >= WALLET_LOCATOR_WRITE_INTERVAL)
+    {
+        const CBlockLocator locator(pindexNew);
+        ::SetBestChain(locator);
+        nLastWalletLocatorWrite = nLocatorNow;
     }
 
     // New best block
@@ -3490,18 +3513,7 @@ bool ApplySnapshotIfPresent(std::string& strInfo)
         return false;
     try
     {
-        if (fFetched)
-        {
-            // Replace the genesis-only chainstate with the snapshot.
-            for (fs::directory_iterator it(GetDataDir()), end; it != end; ++it)
-            {
-                std::string name = it->path().filename().string();
-                if (name.size() > 4 && name.compare(0, 3, "blk") == 0 &&
-                    name.compare(name.size() - 4, 4, ".dat") == 0)
-                    fs::remove(it->path());
-            }
-            fs::remove_all(GetDataDir() / "txleveldb");
-        }
+        // Parse the manifest FIRST -- do not touch the existing chainstate yet.
         int nHeight = -1;
         std::vector<std::pair<std::string, uint256> > files;
         fs::ifstream mf(snapdir / "manifest.txt");
@@ -3519,17 +3531,39 @@ bool ApplySnapshotIfPresent(std::string& strInfo)
             }
         }
         mf.close();
-        if (nHeight < 0 || files.empty()) { strInfo = "snapshot manifest invalid"; return false; }
+        if (nHeight < 0 || files.empty()) { strInfo = "snapshot manifest invalid"; try { fs::remove_all(snapdir); } catch (...) {} return false; }
 
-        // Integrity: every file's sha256 must match the manifest (catches transit corruption).
+        // Integrity: every file's sha256 must match the manifest (catches transit
+        // corruption). This MUST run before we delete anything -- otherwise a corrupt
+        // or truncated snapshot would leave the node with no chainstate at all (the
+        // delete used to happen first, which made the integrity check unable to protect
+        // the very data it guards).
         for (size_t i = 0; i < files.size(); i++)
         {
             fs::path src = snapdir / files[i].first;
             if (!fs::exists(src) || HashSnapshotFile(src) != files[i].second)
             {
                 strInfo = "snapshot integrity check failed: " + files[i].first;
+                // Discard the known-bad staging so we don't re-attempt (and re-fail on)
+                // the same corrupt files every startup -- fall through to a fresh fetch /
+                // normal sync instead. Mirrors Core's cleanup of an invalid snapshot.
+                try { fs::remove_all(snapdir); } catch (...) {}
                 return false;
             }
+        }
+
+        // Snapshot is proven intact -> now it is safe to replace the chainstate.
+        if (fFetched)
+        {
+            // Replace the genesis-only chainstate with the snapshot.
+            for (fs::directory_iterator it(GetDataDir()), end; it != end; ++it)
+            {
+                std::string name = it->path().filename().string();
+                if (name.size() > 4 && name.compare(0, 3, "blk") == 0 &&
+                    name.compare(name.size() - 4, 4, ".dat") == 0)
+                    fs::remove(it->path());
+            }
+            fs::remove_all(GetDataDir() / "txleveldb");
         }
         // Copy chainstate into the datadir (LoadBlockIndex will load it).
         fs::create_directories(GetDataDir() / "txleveldb");
@@ -4870,7 +4904,10 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
             // path. -headersfirst=0 falls back to the legacy inv/getblocks driver.
             if (GetBoolArg("-headersfirst", true)) {
                 g_nLastHeadersRequestHeight = pindexBest ? pindexBest->nHeight : 0;
-                pto->PushGetHeaders(pindexBest, uint256(0));
+                // Force past the unchanged-tip dedup: when the stall watchdog rotates
+                // to a freshly (re)selected sync peer, the tip may not have moved, but
+                // we still need this kickoff getheaders to actually go out.
+                pto->PushGetHeaders(pindexBest, uint256(0), true);
             } else {
                 pto->PushGetBlocks(pindexBest, uint256(0));
             }
@@ -5111,6 +5148,33 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
             if (!vGetBlocks.empty())
                 pto->PushMessage("getdata", vGetBlocks);
 
+            // Header-starvation watchdog -- THE mid-IBD wedge fix.
+            // The rolling look-ahead that refills the queue lives in the "block"
+            // handler, so it only fires when a block ARRIVES (and only once the tip
+            // has advanced 1000 past the last request). If headers stop arriving --
+            // the sync peer goes quiet, or returns a short batch -- the queue drains,
+            // no blocks arrive, the look-ahead never re-arms, and the tip sits wedged
+            // until a manual restart. SendMessages runs every pass regardless of block
+            // arrival, so when we're in IBD with a completely empty pipeline (nothing
+            // queued, nothing in flight) we re-request headers here. PushGetHeaders is
+            // forced past its unchanged-tip dedup (the tip is stuck by definition), and
+            // rate-limited so a genuinely sourceless node doesn't spam. A sync peer
+            // that stays silent through this is rotated by the watchdog in
+            // ThreadMessageHandler2.
+            if (IsInitialBlockDownload() && pindexBest &&
+                g_vBlocksToDownload.empty() && g_mapBlocksInFlight.empty())
+            {
+                static int64_t nLastStarveHeaders = 0;
+                if (nNowSec - nLastStarveHeaders >= SYNC_HEADERS_RETRY)
+                {
+                    nLastStarveHeaders = nNowSec;
+                    g_nLastHeadersRequestHeight = pindexBest->nHeight;
+                    pto->PushGetHeaders(pindexBest, uint256(0), true /*force past dedup*/);
+                    LogPrint("net", "sync: download pipeline empty at tip %d -- re-requesting headers from %s\n",
+                             pindexBest->nHeight, pto->addr.ToString());
+                }
+            }
+
             // Ground-truth instrumentation: shows whether the pipeline is full
             // (download-bound) or starving (in-flight ~0, orphans piling up). On by
             // default, but only while a download is actually in progress, so it
@@ -5152,6 +5216,19 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
                     {
                         if (it->second <= nTip)
                             g_mapBlockHeight.erase(it++);
+                        else
+                            ++it;
+                    }
+                    // Bound g_mapPeerLastBlockTime: ~CNode (and thus FinalizeNode) runs
+                    // off cs_main, so disconnects can't safely touch this map there. It
+                    // grew one entry per NodeId ever seen -- a slow leak on a long run.
+                    // Drop records older than PEER_BLOCKTIME_MAX_AGE; an entry only gates
+                    // the "is this peer still delivering" check, so a live peer just
+                    // re-adds its own on the next block (timeout reassign covers the gap).
+                    for (std::map<NodeId, int64_t>::iterator it = g_mapPeerLastBlockTime.begin(); it != g_mapPeerLastBlockTime.end(); )
+                    {
+                        if (nNowSec - it->second > PEER_BLOCKTIME_MAX_AGE)
+                            g_mapPeerLastBlockTime.erase(it++);
                         else
                             ++it;
                     }

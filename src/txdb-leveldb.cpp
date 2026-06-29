@@ -28,16 +28,19 @@ leveldb::DB *txdb; // global pointer for LevelDB object instance
 
 static leveldb::Options GetOptions() {
     leveldb::Options options;
-    // -dbcache is the LevelDB read (block) cache, in MB. The old default of
-    // 25 MB is tiny on modern machines; a larger cache cuts disk reads during
-    // the initial block download. Bumped to 256 (the per-input ReadTxIndex access
-    // pattern makes the cache unusually impactful for IBD); lower it on small boxes.
-    int nCacheSizeMB = GetArg("-dbcache", 256);
+    // -dbcache is the LevelDB read (block) cache, in MB. Sync on this chain is
+    // wait-bound (peer/pipeline latency), NOT disk-bound -- see doc/ -- so a large
+    // read cache buys little real sync speed while costing a lot of resident RAM.
+    // Default lowered 256 -> 128 to roughly halve the LevelDB footprint; raise
+    // -dbcache if you have RAM to spare and a slow disk, lower it on small boxes.
+    int nCacheSizeMB = GetArg("-dbcache", 128);
     size_t nCacheBytes = (size_t)nCacheSizeMB * 1048576;
     options.block_cache = leveldb::NewLRUCache(nCacheBytes);
-    // A bigger write buffer means fewer memtable flushes / compactions while
-    // syncing (capped so we don't balloon memory on huge -dbcache values).
-    options.write_buffer_size = std::min<size_t>(nCacheBytes / 4, (size_t)64 * 1048576);
+    // Write buffer (memtable). LevelDB keeps up to two live at once (the active one
+    // plus one being flushed), so resident memtable RAM is ~2x this value. Cap at
+    // 32 MB (was 64) to bound that; a bigger buffer only reduces compaction churn,
+    // which matters far less than read latency on a peer-bound sync.
+    options.write_buffer_size = std::min<size_t>(nCacheBytes / 4, (size_t)32 * 1048576);
     options.filter_policy = leveldb::NewBloomFilterPolicy(10);
     // The txindex stores 32-byte hashes and the block index — effectively
     // incompressible — so Snappy just burns CPU on every SST read/write. Disable

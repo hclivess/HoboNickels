@@ -251,7 +251,7 @@ std::string HelpMessage()
         strUsage += "  -conf=<file>           " + _("Specify configuration file (default: HoboNickels.conf)") + "\n";
         strUsage += "  -pid=<file>            " + _("Specify pid file (default: HoboNickelsd.pid)") + "\n";
         strUsage += "  -datadir=<dir>         " + _("Specify data directory") + "\n";
-        strUsage += "  -dbcache=<n>           " + _("Set database cache size in megabytes (default: 256)") + "\n";
+        strUsage += "  -dbcache=<n>           " + _("Set database cache size in megabytes (default: 128; raise for a faster disk-bound sync, lower to save RAM)") + "\n";
         strUsage += "  -checkpointdepth=<n>   " + _("Re-verify signatures only for the most recent <n> blocks (faster); 0 (default) verifies every block above the last hardcoded checkpoint") + "\n";
         strUsage += "  -dblogsize=<n>         " + _("Set database disk log size in megabytes (default: 100)") + "\n";
         strUsage += "  -timeout=<n>           " + _("Specify connection timeout in milliseconds (default: 5000)") + "\n";
@@ -873,6 +873,29 @@ bool AppInit2()
         return false;
     }
 
+    // A snapshot that FAILED checkpoint verification on a previous run left a marker
+    // (written at rejection, below). Its wrong-chain chainstate is still on disk; wipe
+    // it now -- BEFORE ApplySnapshotIfPresent or LoadBlockIndex opens anything -- so we
+    // resync cleanly instead of silently loading the rejected chain. We can't wipe it at
+    // rejection time because LevelDB still has txleveldb open then.
+    if (boost::filesystem::exists(GetDataDir() / "snapshot-rejected"))
+    {
+        namespace fs = boost::filesystem;
+        try {
+            for (fs::directory_iterator it(GetDataDir()), end; it != end; ++it)
+            {
+                std::string name = it->path().filename().string();
+                if (name.size() > 4 && name.compare(0, 3, "blk") == 0 &&
+                    name.compare(name.size() - 4, 4, ".dat") == 0)
+                    fs::remove(it->path());
+            }
+            fs::remove_all(GetDataDir() / "txleveldb");
+            fs::remove_all(GetSnapshotDir());
+            fs::remove(GetDataDir() / "snapshot-rejected");
+        } catch (...) {}
+        LogPrintf("snapshot: wiped chainstate left by a prior failed checkpoint verification; syncing from scratch\n");
+    }
+
     // Instant sync: if a verified chain snapshot is staged in <datadir>/snapshot/ and this
     // is a fresh datadir, apply it (copy the chainstate into place) before loading the
     // index, so the node comes up already synced. Authenticity is enforced right after
@@ -901,8 +924,25 @@ bool AppInit2()
         std::string strErr;
         if (!Checkpoints::VerifyHardenedInChain(nBestHeight, nChecked, strErr))
         {
-            try { boost::filesystem::remove_all(GetSnapshotDir()); } catch (...) {}
-            return InitError(strprintf(_("Chain snapshot failed checkpoint verification (%s). It was discarded; restart to sync normally."), strErr));
+            // Leave a DURABLE marker so the NEXT startup wipes the wrong-chain chainstate
+            // we already copied in (we can't wipe it here -- LevelDB has txleveldb open).
+            // Order matters: write+flush+VERIFY the marker BEFORE removing the staging
+            // dir, so we can never reach the "no manifest, no marker" state that would
+            // silently load the rejected chain next start. If the marker can't be written
+            // (disk failure), keep the staging dir and tell the user to wipe the datadir
+            // rather than risk a silent unverified load.
+            bool fMarked = false;
+            try {
+                boost::filesystem::path mark = GetDataDir() / "snapshot-rejected";
+                { boost::filesystem::ofstream rf(mark); rf << strErr << "\n"; rf.flush(); }
+                fMarked = boost::filesystem::exists(mark);
+            } catch (...) {}
+            if (fMarked)
+            {
+                try { boost::filesystem::remove_all(GetSnapshotDir()); } catch (...) {}
+                return InitError(strprintf(_("Chain snapshot failed checkpoint verification (%s). It was discarded; restart to sync normally."), strErr));
+            }
+            return InitError(strprintf(_("Chain snapshot failed checkpoint verification (%s), and the cleanup marker could not be written. Delete the data directory and restart to sync normally."), strErr));
         }
         LogPrintf("snapshot: verified against %d hardcoded checkpoint(s) at height %d\n", nChecked, nBestHeight);
     }

@@ -108,11 +108,14 @@ void CNode::PushGetBlocks(CBlockIndex* pindexBegin, uint256 hashEnd)
     PushMessage("getblocks", CBlockLocator(pindexBegin), hashEnd);
 }
 
-void CNode::PushGetHeaders(CBlockIndex* pindexBegin, uint256 hashEnd)
+void CNode::PushGetHeaders(CBlockIndex* pindexBegin, uint256 hashEnd, bool fForce)
 {
     // Headers-first sync driver. Filter out duplicate requests so a tip that
-    // hasn't advanced doesn't re-request the same header range.
-    if (pindexBegin == pindexLastGetHeadersBegin && hashEnd == hashLastGetHeadersEnd)
+    // hasn't advanced doesn't re-request the same header range -- UNLESS fForce
+    // is set. The starvation watchdog forces a retry at an unchanged tip on
+    // purpose: when headers stopped arriving, asking again for the same range is
+    // exactly what un-sticks the sync (a silent peer is then rotated separately).
+    if (!fForce && pindexBegin == pindexLastGetHeadersBegin && hashEnd == hashLastGetHeadersEnd)
         return;
     pindexLastGetHeadersBegin = pindexBegin;
     hashLastGetHeadersEnd = hashEnd;
@@ -1726,6 +1729,11 @@ double static NodeSyncScore(const CNode *pnode) {
     return -pnode->nLastRecv;
 }
 
+// Seconds the tip may sit still (with a sync peer assigned, during IBD) before we
+// give up on that peer and rotate to another. Generous: any delivered block advances
+// the tip and resets the timer, so only a genuinely silent peer is ever dropped.
+static const int64_t SYNC_PEER_STALL_TIMEOUT = 90;
+
 void static StartSync(const vector<CNode*> &vNodes) {
     CNode *pnodeNewSync = NULL;
     double dBestScore = 0;
@@ -1799,6 +1807,47 @@ void ThreadMessageHandler2(void* parg)
 
         if (!fHaveSyncNode)
             StartSync(vNodesCopy);
+
+        // Sync-peer stall watchdog. A sync peer that goes silent but stays connected
+        // used to wedge IBD permanently: headers stopped, the block queue drained, and
+        // the look-ahead (which only re-arms on block receipt) never fired again, so the
+        // tip sat still until a manual restart. The header-starvation watchdog in
+        // SendMessages first re-asks for headers; if the tip still hasn't moved after
+        // SYNC_PEER_STALL_TIMEOUT, the peer is genuinely unresponsive -- drop it so the
+        // StartSync above (next loop) picks a different one and issues a fresh getheaders.
+        {
+            static int nWatchTipHeight = -1;
+            static int64_t nWatchTipTime = 0;
+            static CNode* pWatchSyncPeer = NULL;
+            int64_t nNow = GetTime();
+            // Snapshot the global ONCE. The socket thread can set pnodeSync = NULL at any
+            // moment (CNode::CloseSocketDisconnect), so re-reading the global between the
+            // guard and the dereference would be a TOCTOU race -> NULL-deref crash. Using
+            // a local closes that window: when fHaveSyncNode is true, pSync is the
+            // loop-top AddRef'd node (alive this iteration); the socket thread only ever
+            // NULLs the global, and StartSync (this thread) sets it non-NULL only when
+            // fHaveSyncNode is false -- so pSync is either that live node or NULL.
+            CNode* pSync = pnodeSync;
+            // Reset the timer when the tip advances OR the sync peer changes (a freshly
+            // selected peer must get a full window before we judge it). pSync is only ever
+            // compared here, never dereferenced, so a stale value is harmless.
+            if (nBestHeight != nWatchTipHeight || pSync != pWatchSyncPeer)
+            {
+                nWatchTipHeight = nBestHeight;
+                pWatchSyncPeer = pSync;
+                nWatchTipTime = nNow;
+            }
+            else if (fHaveSyncNode && pSync && IsInitialBlockDownload() &&
+                     nNow - nWatchTipTime > SYNC_PEER_STALL_TIMEOUT)
+            {
+                LogPrintf("sync: tip stalled at %d for %ds -- dropping unresponsive sync peer %s\n",
+                          nBestHeight, (int)(nNow - nWatchTipTime), pSync->addr.ToString());
+                pSync->fDisconnect = true;
+                pnodeSync = NULL;        // force StartSync to choose a new peer next loop
+                pWatchSyncPeer = NULL;
+                nWatchTipTime = nNow;    // give the replacement a full window
+            }
+        }
 
         // Poll the connected nodes for messages
         g_fMsgMoreWork = false;   // set by ProcessMessages if a pass stops early with work left
