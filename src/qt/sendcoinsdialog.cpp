@@ -205,7 +205,7 @@ void SendCoinsDialog::on_sendButton_clicked()
 
     fNewRecipientAllowed = false;
 
-    QMessageBox::StandardButton retval = QMessageBox::question(this, tr("Confirm send coins"),
+    QMessageBox::StandardButton retval = QMessageBox::question(this, tr("Confirm send"),
                           ( recipients.count() > 1 ?
                               tr("Are you sure you want to send %1<br/>(total: <b>%2</b>)?").arg(formatted.join(tr(" and ")), BitcoinUnits::formatWithUnit(BitcoinUnits::BTC, total)) :
                               tr("Are you sure you want to send %1?").arg(formatted.join(tr(" and ")))),
