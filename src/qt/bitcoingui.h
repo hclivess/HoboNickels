@@ -88,6 +88,7 @@ private:
     QLabel *labelStakingIcon;
     QLabel *labelConnectionsIcon;
     QLabel *labelBlocksIcon;
+    QLabel *labelBlockInfo;
     QLabel *progressBarLabel;
     QProgressBar *progressBar;
 

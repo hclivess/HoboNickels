@@ -171,6 +171,10 @@ BitcoinGUI::BitcoinGUI(QWidget *parent):
     frameBlocksLayout->addWidget(labelBlocksIcon);
     frameBlocksLayout->addStretch();
 
+    // Current block height + its timestamp, shown at the bottom-left.
+    labelBlockInfo = new QLabel();
+    labelBlockInfo->setToolTip(tr("Current block height and the time of that block"));
+
     // Progress bar and label for blocks download
     progressBarLabel = new QLabel();
     progressBarLabel->setVisible(false);
@@ -187,6 +191,7 @@ BitcoinGUI::BitcoinGUI(QWidget *parent):
         progressBar->setStyleSheet("QProgressBar { background-color: #e8e8e8; border: 1px solid grey; border-radius: 7px; padding: 1px; text-align: center; } QProgressBar::chunk { background: QLinearGradient(x1: 0, y1: 0, x2: 1, y2: 0, stop: 0 #FF8000, stop: 1 orange); border-radius: 7px; margin: 0px; }");
     }
 
+    statusBar()->addWidget(labelBlockInfo);
     statusBar()->addWidget(progressBarLabel);
     statusBar()->addWidget(progressBar);
     statusBar()->addPermanentWidget(frameBlocks);
@@ -822,6 +827,11 @@ void BitcoinGUI::setNumBlocks(int count, int nTotalBlocks)
     QDateTime currentDate = QDateTime::currentDateTime();
     int totalSecs = GetTime() - 1374628210;
     int secs = lastBlockDate.secsTo(currentDate);
+
+    // Bottom-left readout: current block height and the timestamp of that block.
+    labelBlockInfo->setText(tr("Block %1  \xC2\xB7  %2")
+                            .arg(count)
+                            .arg(lastBlockDate.toString("yyyy-MM-dd HH:mm:ss")));
 
     if(count < nTotalBlocks) {
         tooltip = tr("Processed %1 of %2 (estimated) blocks of transaction history.").arg(count).arg(nTotalBlocks);
