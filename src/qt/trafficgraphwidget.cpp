@@ -60,11 +60,12 @@ void TrafficGraphWidget::paintPath(QPainterPath &path, QQueue<float> &samples)
 void TrafficGraphWidget::paintEvent(QPaintEvent *)
 {
     QPainter painter(this);
-    painter.fillRect(rect(), Qt::black);
+    painter.setRenderHint(QPainter::Antialiasing);            // modern: smooth lines (Core does this)
+    painter.fillRect(rect(), palette().color(QPalette::Base)); // theme-aware bg (was hardcoded black)
 
     if(fMax <= 0.0f) return;
 
-    QColor axisCol(Qt::gray);
+    QColor axisCol = palette().color(QPalette::Mid);          // theme-aware axis (was hardcoded gray)
     int h = height() - YMARGIN * 2;
     painter.setPen(axisCol);
     painter.drawLine(XMARGIN, YMARGIN + h, width() - XMARGIN, YMARGIN + h);
@@ -97,20 +98,33 @@ void TrafficGraphWidget::paintEvent(QPaintEvent *)
         }
     }
 
+    // Toned green/red that read on both light and dark backgrounds.
+    const QColor inCol(0, 160, 0), outCol(200, 40, 40);
     if(!vSamplesIn.empty()) {
         QPainterPath p;
         paintPath(p, vSamplesIn);
-        painter.fillPath(p, QColor(0, 255, 0, 128));
-        painter.setPen(Qt::green);
+        painter.fillPath(p, QColor(inCol.red(), inCol.green(), inCol.blue(), 96));
+        painter.setPen(inCol);
         painter.drawPath(p);
     }
     if(!vSamplesOut.empty()) {
         QPainterPath p;
         paintPath(p, vSamplesOut);
-        painter.fillPath(p, QColor(255, 0, 0, 128));
-        painter.setPen(Qt::red);
+        painter.fillPath(p, QColor(outCol.red(), outCol.green(), outCol.blue(), 96));
+        painter.setPen(outCol);
         painter.drawPath(p);
     }
+
+    // Legend with live in/out rates (top-left). front() is the newest sample.
+    float inRate  = vSamplesIn.empty()  ? 0.0f : vSamplesIn.front();
+    float outRate = vSamplesOut.empty() ? 0.0f : vSamplesOut.front();
+    int sw = 10, gap = 6, lx = XMARGIN + 4, ly = YMARGIN + 4;
+    int rowh = painter.fontMetrics().height() + 3;
+    painter.fillRect(lx, ly, sw, sw, inCol);
+    painter.setPen(palette().color(QPalette::Text));
+    painter.drawText(lx + sw + gap, ly + sw, tr("In: %1 KB/s").arg(inRate, 0, 'f', 1));
+    painter.fillRect(lx, ly + rowh, sw, sw, outCol);
+    painter.drawText(lx + sw + gap, ly + rowh + sw, tr("Out: %1 KB/s").arg(outRate, 0, 'f', 1));
 }
 
 void TrafficGraphWidget::updateRates()

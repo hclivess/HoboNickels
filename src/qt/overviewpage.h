@@ -13,6 +13,9 @@ class TransactionFilterProxy;
 
 QT_BEGIN_NAMESPACE
 class QModelIndex;
+class QFrame;
+class QLabel;
+class QTimer;
 QT_END_NAMESPACE
 
 /** Overview ("home") page widget */
@@ -50,10 +53,21 @@ private:
     TxViewDelegate *txdelegate;
     TransactionFilterProxy *filter;
 
+    // On-page staking panel (gold-accented), built in code to avoid fragile .ui edits.
+    QFrame *stakingFrame;
+    QLabel *labelStakingStatus;
+    QLabel *labelStakeWeight;
+    QLabel *labelNetworkWeight;
+    QLabel *labelNetworkShare;
+    QLabel *labelExpectedTime;
+    QTimer *stakingTimer;
+    void createStakingPanel();
+
 private slots:
     void updateDisplayUnit();
     void handleTransactionClicked(const QModelIndex &index);
     void updateAlerts(const QString &warnings);
+    void updateStakingStats();
 };
 
 #endif // OVERVIEWPAGE_H

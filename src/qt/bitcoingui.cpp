@@ -1308,8 +1308,11 @@ void BitcoinGUI::updateStakingIcon()
         else
         {
             quint64 nNetworkWeight = clientModel->getPosKernalPS();
-            int nEstimateTime = clientModel->getStakeTargetSpacing() * nNetworkWeight / nWeight;
-            QString text = (GUIUtil::formatDurationStr(nEstimateTime));
+            // int64 math + guard: avoids the int overflow / "0 seconds" the old line hit for tiny/zero weights.
+            int64_t nEstimateTime = (nNetworkWeight > 0)
+                ? (int64_t)clientModel->getStakeTargetSpacing() * (int64_t)nNetworkWeight / (int64_t)nWeight
+                : 0;
+            QString text = (nEstimateTime > 0) ? GUIUtil::formatDurationStr((int)nEstimateTime) : tr("unknown");
 
             labelStakingIcon->setPixmap(QIcon(":/icons/staking_on").pixmap(STATUSBAR_ICONSIZE,STATUSBAR_ICONSIZE));
             labelStakingIcon->setToolTip(tr("Staking.\n Your weight is %1\n Network weight is %2\n You have 50\% chance of producing a stake within %3").arg(nWeight).arg(nNetworkWeight).arg(text));
