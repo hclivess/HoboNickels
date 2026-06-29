@@ -1808,6 +1808,10 @@ void ThreadMessageHandler2(void* parg)
         if (!fHaveSyncNode)
             StartSync(vNodesCopy);
 
+        // Keep our served chain snapshot current so fresh peers can instant-sync from us
+        // with no operator action (self-throttled; only acts once synced).
+        MaybeCreateAutoSnapshot();
+
         // Sync-peer stall watchdog. A sync peer that goes silent but stays connected
         // used to wedge IBD permanently: headers stopped, the block queue drained, and
         // the look-ahead (which only re-arms on block receipt) never fired again, so the

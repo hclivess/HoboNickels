@@ -189,6 +189,8 @@ bool LoadExternalBlockFile(FILE* fileIn);
 // Chain snapshot (instant sync) -- see main.cpp.
 boost::filesystem::path GetSnapshotDir();
 bool CreateChainSnapshot(std::string& strError);
+/** Auto-stage/refresh the served snapshot (synced nodes only); self-throttled, non-blocking. */
+void MaybeCreateAutoSnapshot();
 bool ApplySnapshotIfPresent(std::string& strInfo);
 extern bool g_fSnapshotApplied;
 // snap-sync client

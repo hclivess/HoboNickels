@@ -340,6 +340,7 @@ std::string HelpMessage()
         strUsage += "  -checkblocks=<n>       " + _("How many blocks to check at startup (default: 250, 0 = all)") + "\n";
         strUsage += "  -headersfirst          " + _("Sync using headers-first block download (default: 1; set 0 for the legacy inv-based sync)") + "\n";
         strUsage += "  -snapsync              " + _("On a fresh node, fetch a checkpoint-verified chain snapshot from a peer for instant sync (default: 1; set 0 to fully sync from genesis)") + "\n";
+        strUsage += "  -snapserve             " + _("Once synced, automatically stage and serve a chain snapshot to fresh peers (hard-linked, no extra disk; default: 1; set 0 to not seed snapshots)") + "\n";
         strUsage += "  -debugsync             " + _("Log block-download pipeline stats (in-flight/queued/orphans) every 5s while syncing (default: 1; set 0 to disable)") + "\n";
         strUsage += "  -checklevel=<n>        " + _("How thorough the block verification is (0-6, default: 1)") + "\n";
         strUsage += "  -par=N                 " + _("Set the number of script verification threads (1-16, 0=auto, default: 0)") + "\n";

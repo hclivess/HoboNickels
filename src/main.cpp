@@ -3436,12 +3436,17 @@ static uint256 HashSnapshotFile(const boost::filesystem::path& p)
 bool CreateChainSnapshot(std::string& strError)
 {
     namespace fs = boost::filesystem;
-    LOCK(cs_main);   // pause block connection so the chainstate is copied consistently
+    LOCK(cs_main);   // pause block connection so the staged set is a consistent height
     if (!pindexBest)
     {
         strError = "no chain to snapshot yet";
         return false;
     }
+    // The snapshot dir is built from HARD LINKS to the live db files, not copies, so it
+    // uses ~no extra disk and is near-instant to stage. blk*.dat are append-only (we
+    // record the length at this consistent instant and serve only that prefix later);
+    // LevelDB SSTs are immutable once written, and the hard link keeps any that
+    // compaction later unlinks alive for as long as we serve them.
     fs::path snapdir = GetSnapshotDir();
     try
     {
@@ -3459,7 +3464,7 @@ bool CreateChainSnapshot(std::string& strError)
             if (name.size() > 4 && name.compare(0, 3, "blk") == 0 &&
                 name.compare(name.size() - 4, 4, ".dat") == 0)
             {
-                fs::copy_file(it->path(), snapdir / name);
+                fs::create_hard_link(it->path(), snapdir / name);
                 manifest << "file " << name << " " << fs::file_size(snapdir / name)
                          << " " << HashSnapshotFile(snapdir / name).ToString() << "\n";
             }
@@ -3470,7 +3475,7 @@ bool CreateChainSnapshot(std::string& strError)
             std::string name = it->path().filename().string();
             if (name == "LOCK")
                 continue;
-            fs::copy_file(it->path(), snapdir / "txleveldb" / name);
+            fs::create_hard_link(it->path(), snapdir / "txleveldb" / name);
             manifest << "file txleveldb/" << name << " " << fs::file_size(snapdir / "txleveldb" / name)
                      << " " << HashSnapshotFile(snapdir / "txleveldb" / name).ToString() << "\n";
         }
@@ -3486,6 +3491,44 @@ bool CreateChainSnapshot(std::string& strError)
     }
     LogPrintf("CreateChainSnapshot: height=%d -> %s\n", pindexBest->nHeight, snapdir.string());
     return true;
+}
+
+// ---- automatic snapshot maintenance (serve side) --------------------------------
+// A SYNCED node automatically keeps its chain snapshot staged -- as HARD LINKS to the
+// live db, so no extra disk and no copy -- and serves it to fresh peers with ZERO
+// operator action: no createsnapshot, no archive. Refreshed periodically so the served
+// height tracks the tip. Skipped during IBD (we only seed a complete chain) and when
+// -snapserve=0. Hard-linking is near-instant, so the brief cs_main hold doesn't disrupt
+// the node. This is what makes "automatic P2P snap-sync" actually automatic.
+static const int64_t SNAPSHOT_REFRESH_SECONDS = 6 * 60 * 60;   // re-stage the served set this often
+static int64_t g_nLastAutoSnapshot = 0;
+static volatile bool g_fAutoSnapshotRunning = false;
+
+static void ThreadAutoSnapshot(void*)
+{
+    RenameThread("hobo-autosnap");
+    std::string strErr;
+    if (CreateChainSnapshot(strErr))
+        LogPrintf("auto-snapshot: staged for snap-sync serving (hard-linked live db, no extra disk)\n");
+    else
+        LogPrintf("auto-snapshot: not staged (%s)\n", strErr);
+    g_fAutoSnapshotRunning = false;
+}
+
+// Called every message-handler pass; self-throttled. Stages/refreshes the served
+// snapshot in a worker thread so the loop never blocks on it.
+void MaybeCreateAutoSnapshot()
+{
+    if (!GetBoolArg("-snapserve", true)) return;            // opt out of being a seeder
+    if (g_fAutoSnapshotRunning) return;                     // one at a time
+    if (!pindexBest || IsInitialBlockDownload()) return;    // only seed a complete chain
+    int64_t nNow = GetTime();
+    bool fHave = boost::filesystem::exists(GetSnapshotDir() / "manifest.txt");
+    if (fHave && nNow - g_nLastAutoSnapshot < SNAPSHOT_REFRESH_SECONDS) return;
+    g_nLastAutoSnapshot = nNow;
+    g_fAutoSnapshotRunning = true;
+    if (!NewThread(ThreadAutoSnapshot, NULL))
+        g_fAutoSnapshotRunning = false;
 }
 
 bool g_fSnapshotApplied = false;   // set when a snapshot was applied this startup (-> verify checkpoints after load)
@@ -3565,12 +3608,13 @@ bool ApplySnapshotIfPresent(std::string& strInfo)
             }
             fs::remove_all(GetDataDir() / "txleveldb");
         }
-        // Copy chainstate into the datadir (LoadBlockIndex will load it).
+        // MOVE the received chainstate into the datadir (rename, not copy -- same
+        // filesystem, so a fresh node never needs 2x disk to apply). LoadBlockIndex
+        // then loads it. The now-empty staging dir is removed.
         fs::create_directories(GetDataDir() / "txleveldb");
         for (size_t i = 0; i < files.size(); i++)
-            fs::copy_file(snapdir / files[i].first, GetDataDir() / files[i].first,
-                          fs::copy_options::overwrite_existing);
-        try { fs::remove(snapdir / "READY"); } catch (...) {}   // apply once
+            fs::rename(snapdir / files[i].first, GetDataDir() / files[i].first);
+        try { fs::remove_all(snapdir); } catch (...) {}   // staging consumed; apply once
         g_fSnapshotApplied = true;
         strInfo = strprintf("applied chain snapshot at height %d (verifying checkpoints after load)", nHeight);
         return true;

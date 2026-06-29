@@ -66,3 +66,27 @@ checkpoint check was vacuous only because the test snapshot is below the first h
 checkpoint; a real high snapshot verifies against them.) **Before trusting on mainnet:**
 exercise it with a snapshot above a hardcoded checkpoint, confirm a tampered snapshot is
 rejected, and confirm the re-exec on your platform/launcher.
+
+## v2.3.2 — automatic, zero-extra-disk serving
+
+The original serving side required a manual `createsnapshot` RPC and **copied** the whole
+chainstate into `<datadir>/snapshot/` — doubling disk use and never running on its own. That
+is not "automatic P2P." Fixed in v2.3.2:
+
+- **Hard-link, don't copy (server).** `CreateChainSnapshot` now hard-links the live
+  `blk*.dat` + `txleveldb` files into `snapshot/` instead of copying them. Shared inodes ⇒
+  ~zero extra disk; near-instant to stage; and the link keeps any SST that LevelDB compaction
+  later unlinks alive for as long as we serve it. `blk*.dat` are append-only, so we record each
+  file's length at the consistent (cs_main-held) instant and serve only that prefix.
+- **Move, don't copy (client).** `ApplySnapshotIfPresent` now `rename()`s the received files
+  into the datadir instead of copying, so a fresh node never needs 2× disk to apply, and the
+  staging dir is removed afterwards.
+- **Automatic (`-snapserve`, default on).** A synced node auto-stages and periodically
+  refreshes (`SNAPSHOT_REFRESH_SECONDS`, 6 h) the served snapshot in a worker thread, with no
+  operator action. Skipped during IBD (a node only seeds a complete chain) and when
+  `-snapserve=0`. `createsnapshot` remains for on-demand/testing.
+
+Verified end-to-end locally (seeder → fresh fetcher over `-connect`): the staged
+`snapshot/blk0001.dat` shared the live file's inode (link count 2 — no second copy); the fetcher
+fetched, re-exec'd, applied at the seed height instantly, and left no staging behind. Note: a
+node still only auto-serves once fully synced — seed from a caught-up node.
