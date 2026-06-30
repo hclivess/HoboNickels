@@ -7,7 +7,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(HoboNickels
-    VERSION 2.3.4
+    VERSION 2.3.5
     DESCRIPTION "HoboNickels (HBN) proof-of-stake cryptocurrency"
     LANGUAGES CXX)
 
