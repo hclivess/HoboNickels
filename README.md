@@ -26,8 +26,11 @@ network-compatible**, while everything around them was brought up to date:
 
 - 🛠️ **Modern toolchain** — Ubuntu 24.04 · GCC 13 · OpenSSL 3 · Boost 1.83 ·
   Berkeley DB · Qt 5, built with **CMake** (the old autotools/`.pro` system is retired).
-- ⚡ **Faster sync, lower overhead** — libsecp256k1 signature verification (OpenSSL
-  fallback, no fork), dynamic checkpointing, and tuned LevelDB caching.
+- ⚡ **Instant & faster sync** — automatic P2P **snap-sync** brings a fresh node up in
+  seconds; classic sync is headers-first, multi-peer, and height-windowed (~5–9× faster
+  IBD), with a profiled fix to an O(height²) checkpoint walk and redundant scrypt
+  re-hashing removed. Plus libsecp256k1 signature verification (OpenSSL fallback, no
+  fork), **dynamic checkpointing**, and tuned LevelDB caching.
 - 🖥️ **Modern Qt5 wallet** — high-DPI aware, light/dark themes (`-uitheme`), a fully
   redrawn flat icon set and coin-render branding (no 2014 artwork left).
 - 🪙 **Smarter staking** — autocombine actually consolidates ripe dust and split no
@@ -37,9 +40,11 @@ network-compatible**, while everything around them was brought up to date:
   `getnetworkinfo`, `getwalletinfo`, `getblockheader`, `getmempoolinfo`, `uptime`).
 - ✅ **CI & Docker** — every change is built and tested on Linux + Windows + Docker.
 
-> **Latest release: [v2.0.6-modern](https://github.com/hclivess/HoboNickels/releases/latest)** —
-> working autocombine + saner split defaults, on top of a fully modernized UI.
-> See [`doc/MODERNIZATION.md`](doc/MODERNIZATION.md) for the full list of changes.
+> **Latest release: [v2.3.6-modern](https://github.com/hclivess/HoboNickels/releases/latest)** —
+> the consolidated modern client: instant P2P snap-sync, profiled sync-speed fixes,
+> dynamic-checkpoint fast validation, a rebuilt non-destructive traffic graph, and a
+> staking wallet that no longer slows sync. The [release notes](https://github.com/hclivess/HoboNickels/releases/latest)
+> carry the full changelog since the fork; see also [`doc/MODERNIZATION.md`](doc/MODERNIZATION.md).
 
 ## Download
 
@@ -48,8 +53,8 @@ Pre-built, self-contained binaries for **Linux** and **Windows** are on the
 
 | Component | Linux | Windows |
 | --- | --- | --- |
-| **Daemon** (headless) | `HoboNickelsd-*-linux-x86_64` | `HoboNickelsd-*-windows-x86_64.zip` |
-| **Wallet GUI** (Qt5) | `HoboNickels-qt-*-linux-x86_64` | `HoboNickels-qt-*-windows-x86_64.zip` |
+| **Daemon** (headless) | `HoboNickelsd-*-linux-x86_64.tar.gz` | `HoboNickelsd-*-windows-x86_64.zip` |
+| **Wallet GUI** (Qt5) | `HoboNickels-qt-*-linux-x86_64.tar.gz` | `HoboNickels-qt-*-windows-x86_64.zip` |
 
 The Windows `.zip`s bundle every runtime DLL (and the Qt platform plugin) and are
 verified in CI to launch with the build toolchain off the `PATH` — just unzip and
@@ -108,7 +113,8 @@ networking, GUI theme) are documented in
 - **Automatic stake-output management** — autocombine consolidates ripe small
   outputs and split keeps them a sensible size, plus coin control; all tunable via
   `splitthreshold` / `combinethreshold`.
-- **Built-in block browser** and **network graph**.
+- **Built-in block browser** and a modern **network traffic graph** (smooth area chart,
+  adaptive B/KB/MB units, hover readout).
 - At-a-glance **peer, stake, and block** information.
 - Modern **Qt5 GUI**: high-DPI, light/dark/native themes (`-uitheme`).
 - **RPC console** in the GUI exposing the full command set.
