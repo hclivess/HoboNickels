@@ -208,10 +208,23 @@ void OverviewPage::updateStakingStats()
         return;
     }
 
-    uint64_t nMinWeight = 0, nMaxWeight = 0, nWeight = 0;
-    walletModel->getStakeWeight(nMinWeight, nMaxWeight, nWeight);
-    quint64 nNetworkWeight = (quint64)clientModel->getPosKernalPS();
     int nConn = clientModel->getNumConnections();
+    bool fSyncing = clientModel->inInitialBlockDownload() ||
+                    clientModel->getNumBlocks() < clientModel->getNumBlocksOfPeers();
+
+    // GetStakeWeight() is O(wallet coins) and forces a full coin-set rebuild
+    // (SyncWithWallets invalidates the cache on every connected tx), so skip it
+    // while offline or syncing -- staking can't happen until synced anyway, and
+    // this slot is polled ~10x/sec during sync. Recomputing it every tick is the
+    // main reason a large staking wallet drags down GUI sync. Show it once
+    // online + synced.
+    const QString ellipsis = QString::fromUtf8("\xE2\x80\xA6");
+    bool fWeightKnown = (nConn > 0 && !fSyncing);
+    uint64_t nMinWeight = 0, nMaxWeight = 0, nWeight = 0;
+    if (fWeightKnown)
+        walletModel->getStakeWeight(nMinWeight, nMaxWeight, nWeight);
+
+    quint64 nNetworkWeight = (quint64)clientModel->getPosKernalPS();
 
     QString status;
     bool fActive = false;
@@ -219,8 +232,7 @@ void OverviewPage::updateStakingStats()
         status = tr("Offline");
     else if (nConn < (fTestNet ? 0 : 3))
         status = tr("Acquiring nodes…");
-    else if (clientModel->inInitialBlockDownload() ||
-             clientModel->getNumBlocks() < clientModel->getNumBlocksOfPeers())
+    else if (fSyncing)
         status = tr("Syncing…");
     else if (walletModel->getEncryptionStatus() == WalletModel::Locked)
         status = tr("Locked");
@@ -230,11 +242,11 @@ void OverviewPage::updateStakingStats()
         status = tr("No mature coins");
     else { fActive = true; status = tr("Active"); }
 
-    labelStakeWeight->setText(QString::number(nWeight));
+    labelStakeWeight->setText(fWeightKnown ? QString::number(nWeight) : ellipsis);
     labelNetworkWeight->setText(QString::number(nNetworkWeight));
 
-    double share = (nNetworkWeight > 0) ? (100.0 * (double)nWeight / (double)nNetworkWeight) : 0.0;
-    labelNetworkShare->setText(QString::number(share, 'f', 3) + "%");
+    double share = (fWeightKnown && nNetworkWeight > 0) ? (100.0 * (double)nWeight / (double)nNetworkWeight) : 0.0;
+    labelNetworkShare->setText(fWeightKnown ? QString::number(share, 'f', 3) + "%" : ellipsis);
 
     if (fActive && nWeight > 0 && nNetworkWeight > 0)
     {

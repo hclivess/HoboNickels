@@ -120,7 +120,19 @@ void WalletModel::pollBalanceChanged()
     {
          // Balance and number of transactions might have changed
          cachedNumBlocks = nBestHeight;
-         checkBalanceChanged();
+
+         // checkBalanceChanged() does ~6 full wallet scans. During initial sync
+         // the height advances ~10x/sec, so recomputing every tick needlessly
+         // hammers a large wallet; throttle the heavy recompute to ~30s while
+         // syncing (balances aren't final until synced anyway). Confirmations
+         // still refresh every tick.
+         static int64_t nLastBalancePoll = 0;
+         bool fSyncing = IsInitialBlockDownload() || nBestHeight < GetNumBlocksOfPeers();
+         if(!(fSyncing && GetTime() - nLastBalancePoll < 30))
+         {
+             nLastBalancePoll = GetTime();
+             checkBalanceChanged();
+         }
          if(transactionTableModel)
              transactionTableModel->updateConfirmations();
     }
