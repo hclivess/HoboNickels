@@ -1969,8 +1969,14 @@ void ThreadScriptCheckQuit() {
 
 bool CBlock::ConnectBlock(CTxDB& txdb, CBlockIndex* pindex, bool fJustCheck)
 {
-    // Check it again in case a previous version let a bad block in, but skip BlockSig checking
-    if (!CheckBlock(!fJustCheck, !fJustCheck, false))
+    // Check it again in case a previous version let a bad block in, but skip BlockSig checking.
+    // The proof-of-work was already verified when this block was first accepted into the index;
+    // re-running the memory-hard scrypt PoW hash here is a pure defensive re-check. Below the last
+    // hardcoded checkpoint the chain is hash-pinned (a substituted block can't match the checkpoint),
+    // so that re-check is redundant -- and a live perf profile showed scrypt as the top CPU cost
+    // during IBD. Skip the PoW re-hash below the checkpoint; still re-checked above it.
+    bool fRecheckPOW = !fJustCheck && pindex->nHeight > (int)Checkpoints::GetTotalBlocksEstimate();
+    if (!CheckBlock(fRecheckPOW, !fJustCheck, false))
         return false;
 
     // Do not allow blocks that contain transactions which 'overwrite' older transactions,
