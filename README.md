@@ -60,6 +60,12 @@ The Windows `.zip`s bundle every runtime DLL (and the Qt platform plugin) and ar
 verified in CI to launch with the build toolchain off the `PATH` — just unzip and
 run the `.exe`.
 
+> **Windows SmartScreen** flags the unsigned `.exe` (*"unknown publisher"*). Click
+> **More info → Run anyway**, or right-click → **Properties → Unblock** first. Verify the
+> download against `SHA256SUMS.txt` on the release. To remove the warning entirely we need
+> an Authenticode code-signing certificate — CI is already set up to sign automatically once
+> one is provided; see [`doc/windows-code-signing.md`](doc/windows-code-signing.md).
+
 ## Build from source
 
 **Linux (daemon):**
