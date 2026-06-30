@@ -5,6 +5,7 @@
 #define  BITCOIN_CHECKPOINT_H
 
 #include <map>
+#include <atomic>
 #include "net.h"
 #include "util.h"
 
@@ -51,6 +52,11 @@ namespace Checkpoints
     extern CSyncCheckpoint checkpointMessage;
     extern uint256 hashInvalidCheckpoint;
     extern CCriticalSection cs_hashSyncCheckpoint;
+    // Lock-free mirror of the current sync-checkpoint's block height (0 if unknown).
+    // Read on the validation hot path (ConnectBlock) to advance the assumevalid
+    // horizon without taking cs_hashSyncCheckpoint. A stale-low value only causes
+    // extra (always-safe) verification, so a relaxed atomic is sufficient.
+    extern std::atomic<int> nSyncCheckpointHeight;
 
     CBlockIndex* GetLastSyncCheckpoint();
     bool WriteSyncCheckpoint(const uint256& hashCheckpoint);

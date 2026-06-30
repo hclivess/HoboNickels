@@ -117,6 +117,7 @@ namespace Checkpoints
     CSyncCheckpoint checkpointMessagePending;
     uint256 hashInvalidCheckpoint = 0;
     CCriticalSection cs_hashSyncCheckpoint;
+    std::atomic<int> nSyncCheckpointHeight(0);
 
     // ppcoin: get last synchronized checkpoint
     CBlockIndex* GetLastSyncCheckpoint()
@@ -189,6 +190,9 @@ namespace Checkpoints
 #endif
 
         Checkpoints::hashSyncCheckpoint = hashCheckpoint;
+        // Publish the height for the lock-free assumevalid hint used by ConnectBlock.
+        std::map<uint256, CBlockIndex*>::iterator mi = mapBlockIndex.find(hashCheckpoint);
+        nSyncCheckpointHeight = (mi != mapBlockIndex.end() && mi->second) ? mi->second->nHeight : 0;
         return true;
     }
 

@@ -253,6 +253,7 @@ std::string HelpMessage()
         strUsage += "  -datadir=<dir>         " + _("Specify data directory") + "\n";
         strUsage += "  -dbcache=<n>           " + _("Set database cache size in megabytes (default: 128; raise for a faster disk-bound sync, lower to save RAM)") + "\n";
         strUsage += "  -checkpointdepth=<n>   " + _("Re-verify signatures only for the most recent <n> blocks (faster); 0 (default) verifies every block above the last hardcoded checkpoint") + "\n";
+        strUsage += "  -dyncheckpoint         " + _("Advance the assumevalid horizon to the latest master-signed dynamic checkpoint, skipping signature re-verification below it (default: 1; set 0 for fully trustless normal sync)") + "\n";
         strUsage += "  -dblogsize=<n>         " + _("Set database disk log size in megabytes (default: 100)") + "\n";
         strUsage += "  -timeout=<n>           " + _("Specify connection timeout in milliseconds (default: 5000)") + "\n";
         strUsage += "  -proxy=<ip:port>       " + _("Connect through socks proxy") + "\n";

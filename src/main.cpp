@@ -130,6 +130,8 @@ static const int64_t BLOCK_STALL_TIMEOUT = 10;            // seconds before *red
 static const int64_t SYNC_HEADERS_RETRY = 20;             // s; re-request headers when the IBD pipeline has starved
 static const int64_t WALLET_LOCATOR_WRITE_INTERVAL = 300; // s; persist the wallet sync position this often during IBD
 static const int64_t PEER_BLOCKTIME_MAX_AGE = 1800;       // s; drop a peer's last-delivery record after this (leak bound)
+static const int DYNAMIC_CHECKPOINT_VERIFY_WINDOW = 500;  // always re-verify at least this many of the most recent blocks,
+                                                          // even when a dynamic checkpoint would let us skip further (key-compromise safety margin)
 
 unsigned int GetTargetSpacing()
 {
@@ -1979,19 +1981,38 @@ bool CBlock::ConnectBlock(CTxDB& txdb, CBlockIndex* pindex, bool fJustCheck)
     // two in the chain that violate it. This prevents exploiting the issue against nodes in their
     // initial block download.
     //
-    // Normal sync FULLY validates by default: every block above the last hardcoded
-    // checkpoint has its signatures re-checked (blocks below it are trusted -- their
-    // hashes are immutably anchored by the checkpoints, so re-checking them is
-    // pointless). Now that instant snap-sync (the checkpoint-trusted fast path) is the
-    // default for fresh nodes, ordinary sync is the trustless option, so it no longer
-    // skips signatures.
+    // Per-input signature/script verification is the dominant CPU cost of
+    // connecting a block. We skip it for blocks that sit at or below a *trusted
+    // checkpoint*: their hashes are immutably anchored (CheckBlock above rejects
+    // any substituted history outright), so re-running ECDSA on them is pointless.
+    // Everything above the trusted point is fully re-verified.
     //
-    // -checkpointdepth=N (N>0) opts back into the faster "only re-verify the most recent
-    // N blocks" mode for a normal sync without snap-sync. Safety either way: the
-    // hardcoded checkpoint hashes anchor the chain in CheckBlock, so substituted history
-    // below the last checkpoint is rejected outright.
+    // The trusted point is the highest of:
+    //   * the compiled-in hardcoded checkpoint (Checkpoints::GetTotalBlocksEstimate), and
+    //   * the latest master-signed *dynamic* sync checkpoint (nSyncCheckpointHeight).
+    // Folding in the dynamic checkpoint lets the assumevalid horizon advance with
+    // the network between releases instead of being frozen at the last build --
+    // this is the "dynamic checkpointing" fast path. -dyncheckpoint=0 disables it
+    // for a fully trustless normal sync. A recent safety window
+    // (DYNAMIC_CHECKPOINT_VERIFY_WINDOW) is always re-verified so a compromised
+    // checkpoint key cannot suppress signature checks right up to the tip.
+    //
+    // -checkpointdepth=N (N>0) further restricts full re-verification to only the
+    // most recent N blocks. Safety holds regardless: the checkpoint hashes anchor
+    // the chain, and CheckSync forces the main chain to descend from the dynamic
+    // checkpoint, so every block we connect at/below it is on the trusted chain.
     int nCheckpointDepth = GetArg("-checkpointdepth", 0);   // 0 = verify all above the last checkpoint
     int nVerifyFromHeight = (int)Checkpoints::GetTotalBlocksEstimate();
+    if (GetBoolArg("-dyncheckpoint", true))
+    {
+        int nSync = Checkpoints::nSyncCheckpointHeight.load(std::memory_order_relaxed);
+        if (nSync > nVerifyFromHeight)
+        {
+            int nBestKnownHeight = std::max(nBestHeight, GetNumBlocksOfPeers());
+            int nCapped = std::min(nSync, nBestKnownHeight - DYNAMIC_CHECKPOINT_VERIFY_WINDOW);
+            nVerifyFromHeight = std::max(nVerifyFromHeight, nCapped);
+        }
+    }
     if (nCheckpointDepth > 0)
     {
         int nBestKnownHeight = std::max(nBestHeight, GetNumBlocksOfPeers());

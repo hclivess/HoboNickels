@@ -3,11 +3,14 @@
 
 #include <QWidget>
 #include <QQueue>
+#include <QPoint>
 
 class ClientModel;
 
 QT_BEGIN_NAMESPACE
 class QPaintEvent;
+class QMouseEvent;
+class QPainterPath;
 class QTimer;
 QT_END_NAMESPACE
 
@@ -21,7 +24,9 @@ public:
     int getGraphRangeMins() const;
 
 protected:
-    void paintEvent(QPaintEvent *);
+    void paintEvent(QPaintEvent *) override;
+    void mouseMoveEvent(QMouseEvent *) override;
+    void leaveEvent(QEvent *) override;
 
 public slots:
     void updateRates();
@@ -29,7 +34,12 @@ public slots:
     void clear();
 
 private:
-    void paintPath(QPainterPath &path, QQueue<float> &samples);
+    // Number of stored samples that the current timeframe should display.
+    int visibleSamples() const;
+    // Peak value (KB/s) across the currently visible window, for auto-scaling.
+    void rescaleMax();
+    // Format a KB/s rate with an adaptive B/s, KB/s or MB/s unit.
+    QString formatRate(float kbps, int decimals = 1) const;
 
     QTimer *timer;
     float fMax;
@@ -39,6 +49,10 @@ private:
     quint64 nLastBytesIn;
     quint64 nLastBytesOut;
     ClientModel *clientModel;
+
+    // Interactive crosshair state.
+    QPoint hoverPos;
+    bool hover;
 };
 
 #endif // TRAFFICGRAPHWIDGET_H
