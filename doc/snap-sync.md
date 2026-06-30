@@ -28,11 +28,14 @@ serving peer for the un-checkpointed recent tail, which is then synced + validat
 2. **Fetch.** A fresh node (`-snapsync`, default on) asks **every connected peer** for a
    manifest in parallel and commits to the first that returns a valid one; it then downloads
    that peer's files in chunks, verifies each file's sha256, and stages them to
-   `<datadir>/snapshot/` with a `READY` marker. Normal block sync is paused meanwhile so the
-   datadir stays fresh. If the chosen peer stalls mid-download it restarts discovery, and if
-   **no peer offers a snapshot within ~2 minutes** (the common case on a network where nobody
-   is seeding — e.g. all old clients, which ignore the request) it gives up and syncs
-   normally. So a node never hangs waiting for a snapshot that isn't there.
+   `<datadir>/snapshot/` with a `READY` marker. **Normal block sync runs concurrently while
+   probing** — it is only paused once a provider is committed and the download is actually in
+   progress — so a fresh node never sits idle waiting for a seeder. If a snapshot is found,
+   applying it safely replaces whatever little normal sync fetched meanwhile. If the chosen
+   peer stalls mid-download it restarts discovery, and if **no peer offers a snapshot within
+   ~10 minutes** (the common case on a network where nobody is seeding — e.g. all old clients,
+   which ignore the request) it stops probing and just continues the normal sync that was
+   already underway. So a node never hangs, and the discovery window costs nothing.
 3. **Apply.** On completion the node re-executes itself; the clean startup detects the
    staged snapshot, replaces the genesis-only chainstate with it, loads the index, and
    verifies the checkpoints. Then it syncs the (small) tail to the real tip normally.

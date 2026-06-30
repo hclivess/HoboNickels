@@ -235,9 +235,14 @@ void SyncWithWallets(const CTransaction& tx, const CBlock* pblock, bool fUpdate,
     {
         LOCK(cs_setpwalletRegistered);
         for (CWallet* pwallet : setpwalletRegistered) {
-           pwallet->AddToWalletIfInvolvingMe(tx, pblock, fUpdate);
-           // Preloaded coins cache invalidation
-           pwallet->SetCoinsDataActual(false);
+           bool fInvolved = pwallet->AddToWalletIfInvolvingMe(tx, pblock, fUpdate);
+           // Invalidate the preloaded staking coin set only when it can actually
+           // have changed: this tx touched the wallet's coins (fInvolved), or a
+           // block was connected (pblock != NULL -- coin maturity may have moved).
+           // Skipping unrelated mempool/relay txs avoids needless O(coins)
+           // stake-weight rebuilds on a busy network.
+           if (fInvolved || pblock != NULL)
+               pwallet->SetCoinsDataActual(false);
         }
     }
 }
@@ -3657,7 +3662,9 @@ bool ApplySnapshotIfPresent(std::string& strInfo)
 // bump). Falls back to ordinary sync if no peer serves one.
 static const int SNAP_CHUNK_BYTES = 900000;
 static const int64_t SNAP_PEER_TIMEOUT = 20;     // seconds of no progress from a peer -> try another
-static const int64_t SNAP_GIVEUP_SECONDS = 120;  // if no peer has offered a snapshot by now, sync normally
+static const int64_t SNAP_GIVEUP_SECONDS = 600;  // stop probing for a snapshot provider after this. Normal sync now runs
+                                                 // concurrently while probing (we only pause once a provider commits), so
+                                                 // this window is "free" -- widen it to catch a seeder that connects late.
 
 struct CSnapFetch {
     bool fWanted, fDone;
@@ -3687,7 +3694,11 @@ static const int64_t MAX_PROCESSMESSAGES_MS = 30;
 bool g_fMsgMoreWork = false;
 
 void SnapWant() { if (!g_snap.fDone) { g_snap.fWanted = true; g_snap.nWantStart = GetTime(); } }
-bool SnapFetching() { return g_snap.fWanted && !g_snap.fDone; }   // pause normal block sync while true
+// Pause normal block sync ONLY once we've committed to a provider and are downloading
+// (nPeer != -1). While merely probing for a seeder we let normal sync proceed, so a
+// fresh node never sits idle waiting -- if a snapshot is found, applying it safely wipes
+// whatever little the normal sync fetched in the meantime (ApplySnapshotIfPresent).
+bool SnapFetching() { return g_snap.fWanted && !g_snap.fDone && g_snap.nPeer != -1; }
 
 static void SnapReset()
 {
@@ -3725,10 +3736,12 @@ void SnapFetchSendMessages(CNode* pto)
 {
     if (!g_snap.fWanted || g_snap.fDone)
         return;
-    // Give up and sync normally if no peer has committed a snapshot in time. This is the
-    // common case on a network where no node is serving one (e.g. all old clients, which
-    // ignore getsnapshot): without this the node would spin forever with normal sync
-    // paused. Only applies before a download has actually started (no peer committed yet).
+    // Stop probing for a snapshot provider after a bounded window. Normal sync now runs
+    // concurrently while we probe (SnapFetching() only pauses once a provider commits),
+    // so this no longer halts the chain -- it just bounds how long we keep hoping a
+    // seeder appears before committing fully to ordinary sync. Common case: a network
+    // where no node serves one (all old clients ignore getsnapshot). Only applies before
+    // a download has actually started (no peer committed yet).
     if (g_snap.nPeer == -1 && g_snap.nWantStart > 0 &&
         GetTime() - g_snap.nWantStart > SNAP_GIVEUP_SECONDS)
     {
