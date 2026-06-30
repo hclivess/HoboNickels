@@ -26,7 +26,7 @@ std::string getBlockHash(qint64 Height)
     qint64 desiredheight;
     desiredheight = Height;
     if (desiredheight < 0 || desiredheight > nBestHeight)
-        return 0;
+        return "";   // (was 'return 0' -> constructs std::string from null = UB)
 
     CBlockIndex* pblockindex = mapBlockIndex[hashBestChain];
     while (pblockindex->nHeight > desiredheight)
@@ -52,7 +52,7 @@ std::string getBlockMerkle(qint64 Height)
     uint256 hash(strHash);
 
     if (mapBlockIndex.count(hash) == 0)
-        return 0;
+        return "";   // (was 'return 0' -> std::string from null = UB)
 
     CBlockIndex* pblockindex = mapBlockIndex[hash];
     return pblockindex->hashMerkleRoot.ToString();//.substr(0,10).c_str();
@@ -243,39 +243,47 @@ BlockBrowser::BlockBrowser(QWidget *parent) :
     connect(ui->blockButton, SIGNAL(pressed()), this, SLOT(blockClicked()));
     connect(ui->txButton, SIGNAL(pressed()), this, SLOT(txClicked()));
     connect(ui->closeButton, SIGNAL(pressed()), this, SLOT(close()));
+    // Live navigation: the height spin-box arrows (and typed values) update the view, so
+    // they act as Prev/Next without extra buttons. Cheap now that a view is a single walk.
+    connect(ui->heightBox, SIGNAL(valueChanged(int)), this, SLOT(blockClicked()));
 }
 
 void BlockBrowser::updateExplorer(bool block)
 {
     if(block)
     {
+        if (!pindexBest)
+            return;
         qint64 height = ui->heightBox->value();
-        if (height > pindexBest->nHeight)
-        {
-            ui->heightBox->setValue(pindexBest->nHeight);
-            height = pindexBest->nHeight;
-        }
+        if (height > pindexBest->nHeight) { height = pindexBest->nHeight; ui->heightBox->setValue(height); }
+        if (height < 0)                   { height = 0;                   ui->heightBox->setValue(0); }
 
+        // Resolve the block index ONCE (a single tip->height pprev walk), then read every
+        // field directly off it. The old code called getBlockHash(height) -- a full chain
+        // walk -- separately for hash/merkle/bits/nonce/time/supply, i.e. ~7 walks per
+        // view, which was painfully slow on a long chain. Now it's one.
         const CBlockIndex* pindex = getBlockIndex(height);
+        if (!pindex)
+            return;
 
         ui->heightLabelBE1->setText(QString::number(height));
-        ui->hashBox->setText(QString::fromUtf8(getBlockHash(height).c_str()));
-        ui->merkleBox->setText(QString::fromUtf8(getBlockMerkle(height).c_str()));
-        ui->bitsBox->setText(QString::number(getBlocknBits(height)));
-        ui->nonceBox->setText(QString::number(getBlockNonce(height)));
-        ui->timeBox->setText(QString::fromUtf8(DateTimeStrFormat(getBlockTime(height)).c_str()));
+        ui->hashBox->setText(QString::fromStdString(pindex->GetBlockHash().GetHex()));
+        ui->merkleBox->setText(QString::fromStdString(pindex->hashMerkleRoot.ToString()));
+        ui->bitsBox->setText(QString::number(pindex->nBits));
+        ui->nonceBox->setText(QString::number(pindex->nNonce));
+        ui->timeBox->setText(QString::fromStdString(DateTimeStrFormat(pindex->nTime)));
         ui->diffBox->setText(QString::number(GetDifficulty(pindex), 'f', 6));
         if (pindex->IsProofOfStake()) {
-            ui->hashRateLabel->setText("Block Network Stake Weight:");
-            ui->diffLabel->setText("PoS Block Difficulty:");
+            ui->hashRateLabel->setText(tr("Block Network Stake Weight:"));
+            ui->diffLabel->setText(tr("PoS Block Difficulty:"));
             ui->hashRateBox->setText(QString::number(GetPoSKernelPS(pindex), 'f', 3) + " ");
         }
         else {
-            ui->hashRateLabel->setText("Block Hash Rate:");
-            ui->diffLabel->setText("PoW Block Difficulty:");
+            ui->hashRateLabel->setText(tr("Block Hash Rate:"));
+            ui->diffLabel->setText(tr("PoW Block Difficulty:"));
             ui->hashRateBox->setText(QString::number(GetPoWMHashPS(pindex), 'f', 3) + " MH/s");
         }
-        ui->moneySupplyBox->setText(QString::number(getMoneySupply(height), 'f', 6) + " HBN");
+        ui->moneySupplyBox->setText(QString::number(convertCoins(pindex->nMoneySupply), 'f', 6) + " HBN");
     }
     else {
         std::string txid = ui->txBox->text().toUtf8().constData();
