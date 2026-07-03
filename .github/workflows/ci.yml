@@ -298,6 +298,68 @@ jobs:
           name: HoboNickels-qt-windows-x86_64
           path: dist/HoboNickels-qt
 
+  build-macos:
+    name: macOS (Apple clang, daemon + GUI)
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew update
+          brew install cmake pkg-config boost openssl@3 berkeley-db@5 \
+            miniupnpc qt@5 secp256k1 leveldb
+
+      - name: Configure
+        run: |
+          BDB="$(brew --prefix berkeley-db@5)"
+          BDBLIB="$(ls "$BDB"/lib/libdb_cxx*.dylib | head -1)"
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWITH_QT_GUI=ON \
+            -DUSE_SYSTEM_LEVELDB=ON \
+            -DENABLE_UPNP=ON \
+            -DBUILD_TESTS=OFF \
+            -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)" \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix qt@5);$BDB;$(brew --prefix openssl@3)" \
+            -DBDBXX_INCLUDE_DIR="$BDB/include" \
+            -DBDBXX_LIBRARY="$BDBLIB"
+
+      - name: Build daemon
+        run: cmake --build build -j"$(sysctl -n hw.ncpu)" --target HoboNickelsd
+
+      - name: Build GUI
+        run: cmake --build build -j"$(sysctl -n hw.ncpu)" --target HoboNickels-qt
+
+      - name: Smoke test the daemon
+        run: |
+          out="$(./build/HoboNickelsd --help 2>&1 || true)"
+          echo "$out" | head -n 5
+          echo "$out" | grep -q "HoboNickels version"
+
+      - name: Bundle the GUI (.app via macdeployqt, best-effort)
+        run: |
+          APP="$(find build -maxdepth 2 -name 'HoboNickels-qt.app' -type d | head -1)"
+          if [ -n "$APP" ]; then
+            "$(brew --prefix qt@5)/bin/macdeployqt" "$APP" || true
+          else
+            echo "No .app bundle produced (plain binary build); skipping macdeployqt"
+          fi
+
+      - name: Stage macOS artifacts
+        run: |
+          mkdir -p dist
+          cp build/HoboNickelsd dist/ 2>/dev/null || true
+          APP="$(find build -maxdepth 2 -name 'HoboNickels-qt.app' -type d | head -1)"
+          if [ -n "$APP" ]; then cp -R "$APP" dist/; else cp build/HoboNickels-qt dist/ 2>/dev/null || true; fi
+          ls -la dist/
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: HoboNickels-macos-x86_64
+          path: dist
+
   docker:
     name: Docker image
     runs-on: ubuntu-24.04
